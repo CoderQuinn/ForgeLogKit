@@ -1,0 +1,4 @@
+module ForgeLogKitC {
+    header "FLLogC.h"
+    export *
+}
