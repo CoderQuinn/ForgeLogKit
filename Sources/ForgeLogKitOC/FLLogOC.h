@@ -23,11 +23,5 @@ FOUNDATION_EXPORT void FLLogOCDebugH(FLLogOCHandle h, const char *msg);
 FOUNDATION_EXPORT void FLLogOCWarnH (FLLogOCHandle h, const char *msg);
 FOUNDATION_EXPORT void FLLogOCErrorH(FLLogOCHandle h, const char *msg);
 
-FOUNDATION_EXPORT void FLLogOCModuleErrorH(
-    FLLogOCHandle h,
-    NSString *module,
-    NSString *format, ...
-) NS_FORMAT_FUNCTION(3,4);
-
 NS_ASSUME_NONNULL_END
 

@@ -8,6 +8,7 @@ import os.log
 
 public struct FLLog {
     private let log: OSLog
+    private let category: String
 
     public init(
         subsystem: String? = nil,
@@ -15,50 +16,67 @@ public struct FLLog {
     ) {
         let sub = subsystem ?? FLConfig.defaultSubsystem
         let cat = category ?? "Default"
+        self.category = cat
         log = OSLog(subsystem: sub, category: cat)
     }
 
-    // MARK: - StaticString (zero-cost)
+    // MARK: - Prefix builder
+
+    @inline(__always)
+    private func prefix(_ level: StaticString) -> String {
+        // [netforge.tcp][INFO]
+        return "[\(category)][\(level)] "
+    }
+
+    // MARK: - StaticString (near-zero cost)
 
     @inline(__always)
     public func info(_ msg: StaticString) {
-        os_log(msg, log: log, type: .info)
+        os_log("%{public}@", log: log, type: .info,
+               prefix("INFO") + String(describing: msg))
     }
 
     @inline(__always)
     public func debug(_ msg: StaticString) {
-        os_log(msg, log: log, type: .debug)
+        os_log("%{public}@", log: log, type: .debug,
+               prefix("DEBUG") + String(describing: msg))
     }
 
     @inline(__always)
     public func warn(_ msg: StaticString) {
-        os_log(msg, log: log, type: .default)
+        os_log("%{public}@", log: log, type: .default,
+               prefix("WARN") + String(describing: msg))
     }
 
     @inline(__always)
     public func error(_ msg: StaticString) {
-        os_log(msg, log: log, type: .error)
+        os_log("%{public}@", log: log, type: .error,
+               prefix("ERROR") + String(describing: msg))
     }
 
-    // MARK: - String (dynamic, explicit cost)
+    // MARK: - String (dynamic)
 
     @inline(__always)
     public func info(_ msg: String) {
-        os_log("%{public}@", log: log, type: .info, msg)
+        os_log("%{public}@", log: log, type: .info,
+               prefix("INFO") + msg)
     }
 
     @inline(__always)
     public func debug(_ msg: String) {
-        os_log("%{public}@", log: log, type: .debug, msg)
+        os_log("%{public}@", log: log, type: .debug,
+               prefix("DEBUG") + msg)
     }
 
     @inline(__always)
     public func warn(_ msg: String) {
-        os_log("%{public}@", log: log, type: .default, msg)
+        os_log("%{public}@", log: log, type: .default,
+               prefix("WARN") + msg)
     }
 
     @inline(__always)
     public func error(_ msg: String) {
-        os_log("%{public}@", log: log, type: .error, msg)
+        os_log("%{public}@", log: log, type: .error,
+               prefix("ERROR") + msg)
     }
 }
