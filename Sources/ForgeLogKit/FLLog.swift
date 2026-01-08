@@ -8,7 +8,7 @@ import os.log
 
 public struct FLLog {
     private let log: OSLog
-    private let category: String
+    internal let category: String
 
     public init(
         subsystem: String? = nil,
@@ -23,7 +23,7 @@ public struct FLLog {
     // MARK: - Prefix builder
 
     @inline(__always)
-    private func prefix(_ level: StaticString) -> String {
+    internal func prefix(_ level: StaticString) -> String {
         // [Default][INFO]
         return "[\(category)][\(level)] "
     }
