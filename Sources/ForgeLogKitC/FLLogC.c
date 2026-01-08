@@ -52,7 +52,7 @@ static inline os_log_t _log(FLLogCHandle h) {
 
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
     const char *sub = subsystem ? subsystem : FLDefaultSubsystem();
-    const char *cat = category  ? category  : "default";
+    const char *cat = category  ? category  : "Default";
 
     FLLogCHandle h = (FLLogCHandle)calloc(1, sizeof(*h));
     if (!h) return NULL;
