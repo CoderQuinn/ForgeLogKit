@@ -59,6 +59,10 @@ FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
 
     h->log = os_log_create(sub, cat);
     h->category = strdup(cat); /* own it */
+    if (!h->category) {
+        free(h);
+        return NULL;
+    }
 
     return h;
 }
