@@ -34,5 +34,11 @@ let package = Package(
             dependencies: ["ForgeLogKitC"],
             path: "Sources/ForgeLogKit"
         ),
+
+        .testTarget(
+            name: "ForgeLogKitTests",
+            dependencies: ["ForgeLogKit"],
+            path: "Tests/ForgeLogKitTests"
+        ),
     ]
 )

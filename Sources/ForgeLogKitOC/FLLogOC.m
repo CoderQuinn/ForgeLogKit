@@ -33,20 +33,3 @@ void FLLogOCWarnH(FLLogOCHandle h, const char *msg) {
 void FLLogOCErrorH(FLLogOCHandle h, const char *msg) {
     FLLogCErrorH((FLLogCHandle)h, msg);
 }
-
-void FLLogOCModuleErrorH(
-    FLLogOCHandle h,
-    NSString *module,
-    NSString *format, ...
-) {
-    va_list args;
-    va_start(args, format);
-
-    NSString *body =
-        [[NSString alloc] initWithFormat:format arguments:args];
-    NSString *full =
-        [NSString stringWithFormat:@"[%@] %@", module, body];
-
-    FLLogCErrorH((FLLogCHandle)h, full.UTF8String);
-    va_end(args);
-}

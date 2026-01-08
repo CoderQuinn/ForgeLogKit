@@ -15,12 +15,12 @@ extern "C" {
 #endif
 
 /*
- * 编译期可配置日志 buffer 大小
+ * Compile-time configurable log buffer size
  *
- * 默认 1024
- * 外部可通过 -DFL_LOG_MAX_BUF=1024 覆盖
+ * Default: 1024
+ * Override via -DFL_LOG_MAX_BUF=1024
  *
- * 必须是编译期常量（用于栈数组）
+ * Must be a compile-time constant (used for stack array)
  */
 #ifndef FL_LOG_MAX_BUF
 #define FL_LOG_MAX_BUF 1024
@@ -37,19 +37,19 @@ typedef enum {
 } FLLogLevel;
 
 /*
- * 创建日志实例
+ * Create a log handle
  *
- * subsystem == NULL → 使用默认 subsystem
- * category  == NULL → 使用 "Default"
+ * subsystem == NULL → use default subsystem
+ * category  == NULL → use "Default"
  */
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category);
 
 /*
- * 释放 handle（os_log_t 无需释放，仅 free handle）
+ * Destroy handle (os_log_t does not need releasing; only free the wrapper)
  */
 void FLLogCDestroy(FLLogCHandle h);
 
-/* -------- 基础字符串接口 -------- */
+/* -------- Basic string APIs -------- */
 
 void FLLogCInfoH (FLLogCHandle h, const char *msg);
 void FLLogCDebugH(FLLogCHandle h, const char *msg);
@@ -57,11 +57,11 @@ void FLLogCWarnH (FLLogCHandle h, const char *msg);
 void FLLogCErrorH(FLLogCHandle h, const char *msg);
 void FLLogCFaultH(FLLogCHandle h, const char *msg);
 
-/* -------- printf / vprintf 接口 --------
+/* -------- printf / vprintf APIs --------
  *
- * 注意：
- * os_log 的 format 必须是编译期常量字符串
- * 因此内部实现会：
+ * Note:
+ * os_log format must be a compile-time constant string.
+ * Therefore the implementation does:
  *   vsnprintf → char buf[FL_LOG_MAX_BUF]
  *   os_log("%{public}s", buf)
  */

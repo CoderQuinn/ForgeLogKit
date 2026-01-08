@@ -8,6 +8,15 @@ Network Extension, and mixed-language projects.
 
 ---
 
+## Installation (Swift Package Manager)
+
+Add the package:
+
+```swift
+dependencies: [
+  .package(url: "https://github.com/CoderQuinn/ForgeLogKit.git", .upToNextMinor(from: "0.2.0")),
+],
+```
 ## Components
 
 ForgeLogKit is split into three layers:
@@ -71,7 +80,7 @@ FLLogCLogfH(h, FL_LOG_LEVEL_DEBUG, "recv len=%u", len);
 
 ## Versioning
 
-**Current version:** 0.1.0
+**Current version:** 0.2.0
 
 - APIs are usable and stable for intended use cases
 - Internal behavior may evolve
