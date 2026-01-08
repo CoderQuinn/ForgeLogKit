@@ -139,13 +139,13 @@ struct FLLogTests {
     @Test("Log message with dynamic String")
     func testDynamicStringMessage() throws {
         let logger = FLLog(category: "Test")
-        let timestamp = "2026-01-08"
+        let dynamicValue = "example"
         
         // These should compile and run without issues
-        logger.info("Info at \(timestamp)")
-        logger.debug("Debug at \(timestamp)")
-        logger.warn("Warn at \(timestamp)")
-        logger.error("Error at \(timestamp)")
+        logger.info("Info at \(dynamicValue)")
+        logger.debug("Debug at \(dynamicValue)")
+        logger.warn("Warn at \(dynamicValue)")
+        logger.error("Error at \(dynamicValue)")
         
         #expect(logger.category == "Test")
     }
@@ -348,11 +348,13 @@ struct FLLogCTests {
         let handle = FLLogCCreate("com.test", "Test")
         #expect(handle != nil)
         
-        // Create a message that's longer than typical but within buffer
-        let longMessage = String(repeating: "A", count: 500)
-        FLLogCInfoH(handle, longMessage)
+        // Create a message that's within buffer limits
+        // FL_LOG_MAX_BUF is 1024, so test with ~500 chars (well within limit)
+        let mediumMessage = String(repeating: "A", count: 500)
+        FLLogCInfoH(handle, mediumMessage)
         
         // Create a message that exceeds FL_LOG_MAX_BUF (1024)
+        // This tests buffer truncation behavior - should not crash
         let veryLongMessage = String(repeating: "B", count: 2000)
         FLLogCInfoH(handle, veryLongMessage)
         
