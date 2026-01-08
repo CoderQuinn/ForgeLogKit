@@ -24,7 +24,7 @@ public struct FLLog {
 
     @inline(__always)
     private func prefix(_ level: StaticString) -> String {
-        // [netforge.tcp][INFO]
+        // [Default][INFO]
         return "[\(category)][\(level)] "
     }
 
