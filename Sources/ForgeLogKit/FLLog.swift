@@ -20,14 +20,6 @@ public struct FLLog {
         log = OSLog(subsystem: sub, category: cat)
     }
 
-    // MARK: - Prefix builder
-
-    @inline(__always)
-    private func prefix(_ level: StaticString) -> String {
-        // [Default][INFO]
-        return "[\(category)][\(level)] "
-    }
-
     // MARK: - StaticString (near-zero cost)
 
     @inline(__always)
@@ -58,25 +50,25 @@ public struct FLLog {
 
     @inline(__always)
     public func info(_ msg: String) {
-        os_log("%{public}@", log: log, type: .info,
-               prefix("INFO") + msg)
+        os_log("[%{public}@][INFO] %{public}@", log: log, type: .info,
+               category, msg)
     }
 
     @inline(__always)
     public func debug(_ msg: String) {
-        os_log("%{public}@", log: log, type: .debug,
-               prefix("DEBUG") + msg)
+        os_log("[%{public}@][DEBUG] %{public}@", log: log, type: .debug,
+               category, msg)
     }
 
     @inline(__always)
     public func warn(_ msg: String) {
-        os_log("%{public}@", log: log, type: .default,
-               prefix("WARN") + msg)
+        os_log("[%{public}@][WARN] %{public}@", log: log, type: .default,
+               category, msg)
     }
 
     @inline(__always)
     public func error(_ msg: String) {
-        os_log("%{public}@", log: log, type: .error,
-               prefix("ERROR") + msg)
+        os_log("[%{public}@][ERROR] %{public}@", log: log, type: .error,
+               category, msg)
     }
 }
