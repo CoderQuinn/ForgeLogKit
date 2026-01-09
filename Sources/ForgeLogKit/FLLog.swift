@@ -32,26 +32,34 @@ public struct FLLog {
 
     @inline(__always)
     public func info(_ msg: StaticString) {
-        os_log("%{public}@", log: log, type: .info,
-               prefix("INFO") + String(describing: msg))
+        msg.withUTF8Buffer { buffer in
+            os_log("[%{public}@][INFO] %{public}s", log: log, type: .info,
+                   category, buffer.baseAddress!)
+        }
     }
 
     @inline(__always)
     public func debug(_ msg: StaticString) {
-        os_log("%{public}@", log: log, type: .debug,
-               prefix("DEBUG") + String(describing: msg))
+        msg.withUTF8Buffer { buffer in
+            os_log("[%{public}@][DEBUG] %{public}s", log: log, type: .debug,
+                   category, buffer.baseAddress!)
+        }
     }
 
     @inline(__always)
     public func warn(_ msg: StaticString) {
-        os_log("%{public}@", log: log, type: .default,
-               prefix("WARN") + String(describing: msg))
+        msg.withUTF8Buffer { buffer in
+            os_log("[%{public}@][WARN] %{public}s", log: log, type: .default,
+                   category, buffer.baseAddress!)
+        }
     }
 
     @inline(__always)
     public func error(_ msg: StaticString) {
-        os_log("%{public}@", log: log, type: .error,
-               prefix("ERROR") + String(describing: msg))
+        msg.withUTF8Buffer { buffer in
+            os_log("[%{public}@][ERROR] %{public}s", log: log, type: .error,
+                   category, buffer.baseAddress!)
+        }
     }
 
     // MARK: - String (dynamic)
