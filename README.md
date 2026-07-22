@@ -1,7 +1,7 @@
 # ForgeLogKit
 
 [![CI / Tests](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml)
-[![Coverage](https://codecov.io/gh/CoderQuinn/ForgeLogKit/graph/badge.svg?branch=main)](https://app.codecov.io/gh/CoderQuinn/ForgeLogKit)
+[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCoderQuinn%2FForgeLogKit%2Fbadges%2Fcoverage.json)](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/CoderQuinn/ForgeLogKit)](LICENSE)
 
 ForgeLogKit is a lightweight logging infrastructure built on top of `os_log`,
