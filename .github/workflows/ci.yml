@@ -8,6 +8,9 @@ on:
 jobs:
   test:
     runs-on: macos-15
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - name: Test package with coverage
@@ -23,6 +26,12 @@ jobs:
         with:
           name: swift-code-coverage
           path: ${{ steps.coverage.outputs.path }}
+      - name: Publish coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          use_oidc: true
+          files: ${{ steps.coverage.outputs.path }}
+          fail_ci_if_error: true
       - name: Check strict concurrency
         run: >-
           swift test
