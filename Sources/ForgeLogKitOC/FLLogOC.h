@@ -18,10 +18,37 @@ FOUNDATION_EXPORT FLLogOCHandle FLLogOCCreate(
     NSString *_Nullable category
 );
 
+FOUNDATION_EXPORT void FLLogOCDestroy(FLLogOCHandle _Nullable h);
+
 FOUNDATION_EXPORT void FLLogOCInfoH (FLLogOCHandle h, const char *msg);
 FOUNDATION_EXPORT void FLLogOCDebugH(FLLogOCHandle h, const char *msg);
 FOUNDATION_EXPORT void FLLogOCWarnH (FLLogOCHandle h, const char *msg);
 FOUNDATION_EXPORT void FLLogOCErrorH(FLLogOCHandle h, const char *msg);
+FOUNDATION_EXPORT void FLLogOCFaultH(FLLogOCHandle h, const char *msg);
+
+typedef NS_ENUM(NSInteger, FLLogOCLevel) {
+    FLLogOCLevelDebug = 0,
+    FLLogOCLevelInfo = 1,
+    FLLogOCLevelWarn = 2,
+    FLLogOCLevelError = 3,
+    FLLogOCLevelFault = 4,
+};
+
+typedef NS_ENUM(NSInteger, FLLogOCPrivacy) {
+    FLLogOCPrivacyPrivate = 0,
+    FLLogOCPrivacyPublic = 1,
+};
+
+FOUNDATION_EXPORT BOOL FLLogOCIsEnabledH(
+    FLLogOCHandle _Nullable h,
+    FLLogOCLevel level
+);
+
+FOUNDATION_EXPORT void FLLogOCLogH(
+    FLLogOCHandle _Nullable h,
+    FLLogOCLevel level,
+    FLLogOCPrivacy privacy,
+    NSString *_Nullable message
+);
 
 NS_ASSUME_NONNULL_END
-

@@ -36,6 +36,11 @@ typedef enum {
     FL_LOG_LEVEL_FAULT = 4,
 } FLLogLevel;
 
+typedef enum {
+    FL_LOG_PRIVACY_PRIVATE = 0,
+    FL_LOG_PRIVACY_PUBLIC  = 1,
+} FLLogPrivacy;
+
 /*
  * Create a log handle
  *
@@ -57,6 +62,17 @@ void FLLogCWarnH (FLLogCHandle h, const char *msg);
 void FLLogCErrorH(FLLogCHandle h, const char *msg);
 void FLLogCFaultH(FLLogCHandle h, const char *msg);
 
+/* Returns non-zero when Unified Logging enables the requested level. */
+int FLLogCIsEnabledH(FLLogCHandle h, FLLogLevel level);
+
+/* Explicit level and privacy API. Invalid privacy values fail closed. */
+void FLLogCLogH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const char *msg
+);
+
 /* -------- printf / vprintf APIs --------
  *
  * Note:
@@ -76,6 +92,22 @@ void FLLogCLogfH(
 void FLLogCVLogfH(
     FLLogCHandle h,
     FLLogLevel level,
+    const char *fmt,
+    va_list ap
+);
+
+void FLLogCLogfPrivacyH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const char *fmt,
+    ...
+) __attribute__((format(printf, 4, 5)));
+
+void FLLogCVLogfPrivacyH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
     const char *fmt,
     va_list ap
 );

@@ -48,6 +48,10 @@ static inline os_log_t _log(FLLogCHandle h) {
     return (h && h->log) ? h->log : OS_LOG_DEFAULT;
 }
 
+static inline int _is_public(FLLogPrivacy privacy) {
+    return privacy == FL_LOG_PRIVACY_PUBLIC;
+}
+
 /* ================= lifecycle ================= */
 
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
@@ -78,6 +82,7 @@ void FLLogCDestroy(FLLogCHandle h) {
 static void _emit(
     FLLogCHandle h,
     FLLogLevel level,
+    FLLogPrivacy privacy,
     const char *msg
 ) {
     if (!msg) return;
@@ -95,34 +100,56 @@ static void _emit(
 
     buf[sizeof(buf) - 1] = '\0';
 
-    os_log_with_type(
-        _log(h),
-        _type_for_level(level),
-        "%{public}s",
-        buf
-    );
+    if (_is_public(privacy)) {
+        os_log_with_type(
+            _log(h),
+            _type_for_level(level),
+            "%{public}s",
+            buf
+        );
+    } else {
+        os_log_with_type(
+            _log(h),
+            _type_for_level(level),
+            "%{private}s",
+            buf
+        );
+    }
 }
 
 /* ================= basic APIs ================= */
 
 void FLLogCInfoH(FLLogCHandle h, const char *msg) {
-    _emit(h, FL_LOG_LEVEL_INFO, msg);
+    _emit(h, FL_LOG_LEVEL_INFO, FL_LOG_PRIVACY_PUBLIC, msg);
 }
 
 void FLLogCDebugH(FLLogCHandle h, const char *msg) {
-    _emit(h, FL_LOG_LEVEL_DEBUG, msg);
+    _emit(h, FL_LOG_LEVEL_DEBUG, FL_LOG_PRIVACY_PUBLIC, msg);
 }
 
 void FLLogCWarnH(FLLogCHandle h, const char *msg) {
-    _emit(h, FL_LOG_LEVEL_WARN, msg);
+    _emit(h, FL_LOG_LEVEL_WARN, FL_LOG_PRIVACY_PUBLIC, msg);
 }
 
 void FLLogCErrorH(FLLogCHandle h, const char *msg) {
-    _emit(h, FL_LOG_LEVEL_ERROR, msg);
+    _emit(h, FL_LOG_LEVEL_ERROR, FL_LOG_PRIVACY_PUBLIC, msg);
 }
 
 void FLLogCFaultH(FLLogCHandle h, const char *msg) {
-    _emit(h, FL_LOG_LEVEL_FAULT, msg);
+    _emit(h, FL_LOG_LEVEL_FAULT, FL_LOG_PRIVACY_PUBLIC, msg);
+}
+
+int FLLogCIsEnabledH(FLLogCHandle h, FLLogLevel level) {
+    return os_log_type_enabled(_log(h), _type_for_level(level));
+}
+
+void FLLogCLogH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const char *msg
+) {
+    _emit(h, level, privacy, msg);
 }
 
 /* ================= printf APIs ================= */
@@ -130,6 +157,22 @@ void FLLogCFaultH(FLLogCHandle h, const char *msg) {
 void FLLogCVLogfH(
     FLLogCHandle h,
     FLLogLevel level,
+    const char *fmt,
+    va_list ap
+) {
+    FLLogCVLogfPrivacyH(
+        h,
+        level,
+        FL_LOG_PRIVACY_PUBLIC,
+        fmt,
+        ap
+    );
+}
+
+void FLLogCVLogfPrivacyH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
     const char *fmt,
     va_list ap
 ) {
@@ -153,12 +196,21 @@ void FLLogCVLogfH(
 
     buf[sizeof(buf) - 1] = '\0';
 
-    os_log_with_type(
-        _log(h),
-        _type_for_level(level),
-        "%{public}s",
-        buf
-    );
+    if (_is_public(privacy)) {
+        os_log_with_type(
+            _log(h),
+            _type_for_level(level),
+            "%{public}s",
+            buf
+        );
+    } else {
+        os_log_with_type(
+            _log(h),
+            _type_for_level(level),
+            "%{private}s",
+            buf
+        );
+    }
 }
 
 void FLLogCLogfH(
@@ -172,5 +224,20 @@ void FLLogCLogfH(
     va_list ap;
     va_start(ap, fmt);
     FLLogCVLogfH(h, level, fmt, ap);
+    va_end(ap);
+}
+
+void FLLogCLogfPrivacyH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const char *fmt,
+    ...
+) {
+    if (!fmt) return;
+
+    va_list ap;
+    va_start(ap, fmt);
+    FLLogCVLogfPrivacyH(h, level, privacy, fmt, ap);
     va_end(ap);
 }
