@@ -1,5 +1,4 @@
 #include "ForgeLogKitCTestSupport.h"
-#include <stddef.h>
 
 void FLLogCTestFormatted(FLLogCHandle h) {
     FLLogCLogfH(h, FL_LOG_LEVEL_INFO, "Value: %d", 42);
@@ -8,7 +7,7 @@ void FLLogCTestFormatted(FLLogCHandle h) {
 }
 
 void FLLogCTestNullFormat(FLLogCHandle h) {
-    FLLogCLogfH(h, FL_LOG_LEVEL_INFO, NULL);
+    FLLogCLogfH(h, FL_LOG_LEVEL_INFO, 0);
 }
 
 void FLLogCTestPrivateFormatted(FLLogCHandle h) {
