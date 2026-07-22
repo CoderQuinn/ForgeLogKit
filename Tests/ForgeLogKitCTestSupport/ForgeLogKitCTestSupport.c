@@ -1,22 +1,19 @@
 #include "ForgeLogKitCTestSupport.h"
-#include <stdarg.h>
-#include <stddef.h>
-#include <string.h>
 
 /* Hidden implementation seams from FLLogC.c. They are deliberately absent
  * from the product header and are consumed only by this test-support target. */
-uint8_t FLLogCInternalTypeForLevel(FLLogLevel level);
+unsigned char FLLogCInternalTypeForLevel(FLLogLevel level);
 int FLLogCInternalIsPublic(FLLogPrivacy privacy);
 int FLLogCInternalFormatMessage(
     char *buf,
-    size_t size,
+    unsigned long size,
     const char *category,
     FLLogLevel level,
     const char *msg
 );
 int FLLogCInternalVFormatMessage(
     char *buf,
-    size_t size,
+    unsigned long size,
     const char *category,
     FLLogLevel level,
     const char *fmt,
@@ -24,7 +21,10 @@ int FLLogCInternalVFormatMessage(
 );
 
 static void FLLogCTestResetEvent(FLLogCTestEvent *event) {
-    if (event) memset(event, 0, sizeof(*event));
+    if (!event) return;
+    event->message[0] = '\0';
+    event->logType = 0;
+    event->isPublic = 0;
 }
 
 static void FLLogCTestSetRouting(
@@ -139,15 +139,15 @@ int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event) {
         FL_LOG_LEVEL_INFO,
         FL_LOG_PRIVACY_PUBLIC,
         event,
-        NULL
+        0
     );
 }
 
 const char *FLLogCTestEventMessage(const FLLogCTestEvent *event) {
-    return event ? event->message : NULL;
+    return event ? event->message : 0;
 }
 
-uint8_t FLLogCTestEventLogType(const FLLogCTestEvent *event) {
+unsigned char FLLogCTestEventLogType(const FLLogCTestEvent *event) {
     return event ? event->logType : 0;
 }
 

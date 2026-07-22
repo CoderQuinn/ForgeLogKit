@@ -7,7 +7,6 @@
 
 #include "FLLogC.h"
 #include <os/log.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -58,8 +57,8 @@ static inline int _is_public(FLLogPrivacy privacy) {
 /* These hidden functions are shared by production emission and the C test
  * support target. They intentionally do not appear in the public header. */
 
-FL_INTERNAL uint8_t FLLogCInternalTypeForLevel(FLLogLevel level) {
-    return (uint8_t)_type_for_level(level);
+FL_INTERNAL unsigned char FLLogCInternalTypeForLevel(FLLogLevel level) {
+    return (unsigned char)_type_for_level(level);
 }
 
 FL_INTERNAL int FLLogCInternalIsPublic(FLLogPrivacy privacy) {
@@ -68,7 +67,7 @@ FL_INTERNAL int FLLogCInternalIsPublic(FLLogPrivacy privacy) {
 
 FL_INTERNAL int FLLogCInternalFormatMessage(
     char *buf,
-    size_t size,
+    unsigned long size,
     const char *category,
     FLLogLevel level,
     const char *msg
@@ -90,7 +89,7 @@ FL_INTERNAL int FLLogCInternalFormatMessage(
 
 FL_INTERNAL int FLLogCInternalVFormatMessage(
     char *buf,
-    size_t size,
+    unsigned long size,
     const char *category,
     FLLogLevel level,
     const char *fmt,
@@ -112,7 +111,7 @@ FL_INTERNAL int FLLogCInternalVFormatMessage(
     va_copy(ap_copy, ap);
     int message_length = vsnprintf(
         buf + n,
-        size - (size_t)n,
+        size - (unsigned long)n,
         fmt,
         ap_copy
     );

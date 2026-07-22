@@ -1,7 +1,6 @@
 #pragma once
 
 #include "FLLogC.h"
-#include <stdint.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -14,7 +13,7 @@ void FLLogCTestAllLevels(FLLogCHandle h);
 
 typedef struct {
     char message[FL_LOG_MAX_BUF];
-    uint8_t logType;
+    unsigned char logType;
     int isPublic;
 } FLLogCTestEvent;
 
@@ -38,7 +37,7 @@ int FLLogCTestPrepareFormattedValues(
 
 int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event);
 const char *FLLogCTestEventMessage(const FLLogCTestEvent *event);
-uint8_t FLLogCTestEventLogType(const FLLogCTestEvent *event);
+unsigned char FLLogCTestEventLogType(const FLLogCTestEvent *event);
 int FLLogCTestEventIsPublic(const FLLogCTestEvent *event);
 
 #ifdef __cplusplus
