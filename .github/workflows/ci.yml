@@ -8,10 +8,81 @@ on:
 jobs:
   test:
     runs-on: macos-15
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
-      - name: Test package
-        run: swift test
+      - name: Test package with coverage
+        run: swift test --enable-code-coverage
+      - name: Verify coverage report
+        id: coverage
+        run: |
+          coverage_path="$(swift test --show-codecov-path)"
+          test -s "$coverage_path"
+          echo "path=$coverage_path" >> "$GITHUB_OUTPUT"
+      - name: Generate coverage badge data
+        run: |
+          product_coverage="$(
+            jq -r '
+              [.data[0].files[]
+                | select(.filename | contains("/Sources/ForgeLogKit/"))
+                | .summary.lines]
+              | (map(.covered) | add) as $covered
+              | (map(.count) | add) as $count
+              | ($covered / $count * 100)
+            ' "${{ steps.coverage.outputs.path }}"
+          )"
+          jq -n \
+            --argjson coverage "$product_coverage" \
+            '{
+              schemaVersion: 1,
+              label: "coverage",
+              message: (((($coverage * 100) | round) / 100 | tostring) + "%"),
+              color: (
+                if $coverage >= 90 then "brightgreen"
+                elif $coverage >= 80 then "green"
+                elif $coverage >= 70 then "yellowgreen"
+                elif $coverage >= 60 then "yellow"
+                else "red"
+                end
+              ),
+              cacheSeconds: 300
+            }' > coverage-badge.json
+          jq -e '
+            .schemaVersion == 1
+            and (.message | endswith("%"))
+            and (.color | length > 0)
+          ' coverage-badge.json > /dev/null
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: swift-code-coverage
+          path: |
+            ${{ steps.coverage.outputs.path }}
+            coverage-badge.json
+      - name: Publish coverage badge data
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          badge_directory="$(mktemp -d)"
+          gh auth setup-git
+          git clone \
+            --branch badges \
+            --single-branch \
+            "https://github.com/${GITHUB_REPOSITORY}.git" \
+            "$badge_directory"
+          cp coverage-badge.json "$badge_directory/coverage.json"
+          git -C "$badge_directory" config user.name "github-actions[bot]"
+          git -C "$badge_directory" config \
+            user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C "$badge_directory" add coverage.json
+          if git -C "$badge_directory" diff --cached --quiet; then
+            exit 0
+          fi
+          git -C "$badge_directory" commit \
+            -m "Update coverage badge for ${GITHUB_SHA}"
+          git -C "$badge_directory" push origin badges
       - name: Check strict concurrency
         run: >-
           swift test

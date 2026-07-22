@@ -1,8 +1,75 @@
 @testable import ForgeLogKit
+import Foundation
 import ForgeLogKitC
 import ForgeLogKitCTestSupport
 import Testing
 import os.log
+
+private struct RecordedLogEvent {
+    let type: OSLogType
+    let privacy: String
+    let message: String
+}
+
+private final class LogRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedEvents: [RecordedLogEvent] = []
+
+    func backend(isEnabled: Bool = true) -> FLLogBackend {
+        FLLogBackend(
+            isEnabled: { _ in isEnabled },
+            emit: { [self] type, privacy, message in
+                let privacyLabel: String
+                switch privacy {
+                case .private: privacyLabel = "private"
+                case .public: privacyLabel = "public"
+                }
+
+                lock.lock()
+                recordedEvents.append(
+                    RecordedLogEvent(
+                        type: type,
+                        privacy: privacyLabel,
+                        message: message
+                    )
+                )
+                lock.unlock()
+            }
+        )
+    }
+
+    var events: [RecordedLogEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedEvents
+    }
+}
+
+private final class MessageProbe {
+    private(set) var evaluationCount = 0
+
+    func evaluate() -> String {
+        evaluationCount += 1
+        return "evaluated"
+    }
+}
+
+private final class UnexpectedValueRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recordedValues: [String] = []
+
+    func record(_ value: String) {
+        lock.lock()
+        recordedValues.append(value)
+        lock.unlock()
+    }
+
+    var values: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return recordedValues
+    }
+}
 
 /// Tests for FLLog Swift API to verify category and level prefixes
 @Suite("FLLog Swift API Tests")
@@ -50,80 +117,90 @@ struct FLLogTests {
     
     // MARK: - Log Level Tests
     
-    @Test("Info log includes INFO level prefix")
-    func testInfoLogLevel() throws {
-        let logger = FLLog(category: "Test")
-        
-        // Test StaticString version
-        logger.info("Test message")
-        
-        // Test String version
-        logger.info("Test message" as String)
-        
-        // Verify the logger was initialized correctly
-        #expect(logger.category == "Test")
-    }
-    
-    @Test("Debug log includes DEBUG level prefix")
-    func testDebugLogLevel() throws {
-        let logger = FLLog(category: "Test")
-        
-        // Test StaticString version
-        logger.debug("Debug message")
-        
-        // Test String version
-        logger.debug("Debug message" as String)
-        
-        #expect(logger.category == "Test")
-    }
-    
-    @Test("Warn log includes WARN level prefix")
-    func testWarnLogLevel() throws {
-        let logger = FLLog(category: "Test")
-        
-        // Test StaticString version
-        logger.warn("Warning message")
-        
-        // Test String version
-        logger.warn("Warning message" as String)
-        
-        #expect(logger.category == "Test")
-    }
-    
-    @Test("Error log includes ERROR level prefix")
-    func testErrorLogLevel() throws {
-        let logger = FLLog(category: "Test")
-        
-        // Test StaticString version
-        logger.error("Error message")
-        
-        // Test String version
-        logger.error("Error message" as String)
-        
-        #expect(logger.category == "Test")
+    @Test("Unified API maps every level and defaults messages to private")
+    func testUnifiedLevelAndDefaultPrivacyRouting() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "Routing", backend: recorder.backend())
+
+        for level in FLLogLevel.allCases {
+            logger.log(level, "message-\(level.rawValue)")
+        }
+
+        let events = recorder.events
+        #expect(events.map(\.type.rawValue) == [
+            OSLogType.debug.rawValue,
+            OSLogType.info.rawValue,
+            OSLogType.default.rawValue,
+            OSLogType.error.rawValue,
+            OSLogType.fault.rawValue,
+        ])
+        #expect(events.map(\.privacy) == Array(repeating: "private", count: 5))
+        #expect(events.map(\.message) == [
+            "[Routing][DEBUG] message-debug",
+            "[Routing][INFO] message-info",
+            "[Routing][WARN] message-warning",
+            "[Routing][ERROR] message-error",
+            "[Routing][FAULT] message-fault",
+        ])
     }
 
-    @Test("Fault log includes FAULT level prefix")
-    func testFaultLogLevel() throws {
-        let logger = FLLog(category: "Test")
+    @Test("Explicit public and private routes are preserved")
+    func testExplicitPrivacyRouting() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "Privacy", backend: recorder.backend())
 
-        logger.fault("Fault message")
-        logger.fault("Fault message" as String)
+        logger.log(.info, "visible", privacy: .public)
+        logger.error("secret", privacy: .private)
 
-        #expect(logger.category == "Test")
+        #expect(recorder.events.map(\.privacy) == ["public", "private"])
+        #expect(recorder.events.map(\.message) == [
+            "[Privacy][INFO] visible",
+            "[Privacy][ERROR] secret",
+        ])
     }
 
-    @Test("Privacy-aware API supports every level")
-    func testPrivacyAwareAPI() throws {
-        let logger = FLLog(category: "Privacy")
+    @Test("0.2 convenience overloads keep public routing")
+    func testLegacyConvenienceRouting() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "Compatibility", backend: recorder.backend())
 
-        logger.log(.debug, "private debug")
-        logger.info("private info", privacy: .private)
-        logger.warn("public warning", privacy: .public)
-        logger.error("private error", privacy: .private)
-        logger.fault("public fault", privacy: .public)
+        logger.debug("static debug")
+        logger.debug("dynamic debug" as String)
+        logger.info("static info")
+        logger.info("dynamic info" as String)
+        logger.warn("static warning")
+        logger.warn("dynamic warning" as String)
+        logger.error("static error")
+        logger.error("dynamic error" as String)
+        logger.fault("static fault")
+        logger.fault("dynamic fault" as String)
 
-        #expect(FLLogLevel.allCases.count == 5)
+        let events = recorder.events
+        #expect(events.map(\.privacy) == Array(repeating: "public", count: 10))
+        #expect(events.map(\.type.rawValue) == [
+            OSLogType.debug.rawValue, OSLogType.debug.rawValue,
+            OSLogType.info.rawValue, OSLogType.info.rawValue,
+            OSLogType.default.rawValue, OSLogType.default.rawValue,
+            OSLogType.error.rawValue, OSLogType.error.rawValue,
+            OSLogType.fault.rawValue, OSLogType.fault.rawValue,
+        ])
+    }
+
+    @Test("Disabled levels do not evaluate autoclosures")
+    func testDisabledLevelIsLazy() {
+        let recorder = LogRecorder()
+        let logger = FLLog(
+            category: "Disabled",
+            backend: recorder.backend(isEnabled: false)
+        )
+        let probe = MessageProbe()
+
+        logger.log(.debug, probe.evaluate())
+        logger.info(probe.evaluate(), privacy: .private)
+
+        #expect(logger.isEnabled(for: .debug) == false)
+        #expect(probe.evaluationCount == 0)
+        #expect(recorder.events.isEmpty)
     }
     
     // MARK: - Initialization Tests
@@ -131,6 +208,7 @@ struct FLLogTests {
     @Test("Logger initialization with subsystem and category")
     func testInitializationWithSubsystemAndCategory() throws {
         let logger = FLLog(subsystem: "com.example.app", category: "Network")
+        #expect(logger.subsystem == "com.example.app")
         #expect(logger.category == "Network")
     }
     
@@ -281,42 +359,70 @@ struct FLLogCTests {
     
     // MARK: - Printf-style API Tests
     
-    @Test("Logf with format string and arguments")
-    func testLogfWithFormatString() throws {
-        let handle = FLLogCCreate("com.test", "Test")
-        #expect(handle != nil)
+    @Test("Variadic formatting preserves values, level, and privacy")
+    func testLogfWithFormatString() {
+        var event = FLLogCTestEvent()
 
-        FLLogCTestFormatted(handle)
-        
-        FLLogCDestroy(handle)
+        let result = FLLogCTestPrepareFormattedValues(
+            "Formatting",
+            FL_LOG_LEVEL_ERROR,
+            FL_LOG_PRIVACY_PRIVATE,
+            42,
+            "worker",
+            3.14159,
+            &event
+        )
+
+        #expect(result == 1)
+        #expect(FLLogCTestEventMessage(&event).map(String.init(cString:)) ==
+            "[Formatting] [ERROR] count=42 name=worker ratio=3.14")
+        #expect(FLLogCTestEventLogType(&event) == OSLogType.error.rawValue)
+        #expect(FLLogCTestEventIsPublic(&event) == 0)
     }
     
-    @Test("Logf with null format string")
-    func testLogfWithNullFormat() throws {
-        let handle = FLLogCCreate("com.test", "Test")
-        #expect(handle != nil)
-        
-        // Should not crash
-        FLLogCTestNullFormat(handle)
-        
-        FLLogCDestroy(handle)
+    @Test("Null variadic format is rejected without an event")
+    func testLogfWithNullFormat() {
+        var event = FLLogCTestEvent()
+
+        #expect(FLLogCTestPrepareNullFormat(&event) == 0)
+        #expect(FLLogCTestEventMessage(&event).map(String.init(cString:)) == "")
     }
 
-    @Test("Privacy-aware C APIs support private and public messages")
-    func testPrivacyAwareCAPI() throws {
-        let handle = FLLogCCreate("com.test", "Privacy")
-        #expect(handle != nil)
+    @Test("C literal path maps every level and explicit privacy")
+    func testPrivacyAwareCAPI() {
+        let cases: [(
+            ForgeLogKitC.FLLogLevel,
+            ForgeLogKitC.FLLogPrivacy,
+            UInt8,
+            String,
+            Int32
+        )] = [
+            (FL_LOG_LEVEL_DEBUG, FL_LOG_PRIVACY_PRIVATE,
+             OSLogType.debug.rawValue, "DEBUG", 0),
+            (FL_LOG_LEVEL_INFO, FL_LOG_PRIVACY_PUBLIC,
+             OSLogType.info.rawValue, "INFO", 1),
+            (FL_LOG_LEVEL_WARN, FL_LOG_PRIVACY_PRIVATE,
+             OSLogType.default.rawValue, "WARN", 0),
+            (FL_LOG_LEVEL_ERROR, FL_LOG_PRIVACY_PUBLIC,
+             OSLogType.error.rawValue, "ERROR", 1),
+            (FL_LOG_LEVEL_FAULT, FL_LOG_PRIVACY_PRIVATE,
+             OSLogType.fault.rawValue, "FAULT", 0),
+        ]
 
-        FLLogCLogH(
-            handle,
-            FL_LOG_LEVEL_INFO,
-            FL_LOG_PRIVACY_PRIVATE,
-            "private path"
-        )
-        FLLogCTestPrivateFormatted(handle)
-        _ = FLLogCIsEnabledH(handle, FL_LOG_LEVEL_INFO)
-
-        FLLogCDestroy(handle)
+        for (level, privacy, expectedType, label, isPublic) in cases {
+            var event = FLLogCTestEvent()
+            #expect(FLLogCTestPrepareLiteral(
+                "CPrivacy",
+                level,
+                privacy,
+                "payload",
+                &event
+            ) == 1)
+            #expect(FLLogCTestEventMessage(&event).map(String.init(cString:)) ==
+                "[CPrivacy] [\(label)] payload")
+            #expect(FLLogCTestEventLogType(&event) == expectedType)
+            #expect(FLLogCTestEventIsPublic(&event) == isPublic)
+        }
     }
     
     // MARK: - Edge Cases
@@ -354,17 +460,21 @@ struct FLLogCTests {
     
     // MARK: - Category and Level Formatting Tests
     
-    @Test("Different categories produce different logs")
-    func testDifferentCategories() throws {
+    @Test("Different categories produce distinct formatted events")
+    func testDifferentCategories() {
         let categories = ["Network", "Database", "UI", "Cache"]
         
         for category in categories {
-            let handle = FLLogCCreate("com.test", category)
-            #expect(handle != nil)
-            
-            FLLogCInfoH(handle, "Test message")
-            
-            FLLogCDestroy(handle)
+            var event = FLLogCTestEvent()
+            #expect(FLLogCTestPrepareLiteral(
+                category,
+                FL_LOG_LEVEL_INFO,
+                FL_LOG_PRIVACY_PUBLIC,
+                "Test message",
+                &event
+            ) == 1)
+            #expect(FLLogCTestEventMessage(&event).map(String.init(cString:)) ==
+                "[\(category)] [INFO] Test message")
         }
     }
     
@@ -378,22 +488,22 @@ struct FLLogCTests {
         FLLogCDestroy(handle)
     }
     
-    @Test("Long messages are handled correctly")
-    func testLongMessages() throws {
-        let handle = FLLogCCreate("com.test", "Test")
-        #expect(handle != nil)
-        
-        // Create a message that's within buffer limits
-        // FL_LOG_MAX_BUF is 1024, so test with ~500 chars (well within limit)
-        let mediumMessage = String(repeating: "A", count: 500)
-        FLLogCInfoH(handle, mediumMessage)
-        
-        // Create a message that exceeds FL_LOG_MAX_BUF (1024)
-        // This tests buffer truncation behavior - should not crash
+    @Test("Long C messages are terminated and truncated to the buffer")
+    func testLongMessages() {
         let veryLongMessage = String(repeating: "B", count: 2000)
-        FLLogCInfoH(handle, veryLongMessage)
-        
-        FLLogCDestroy(handle)
+        var event = FLLogCTestEvent()
+
+        #expect(FLLogCTestPrepareLiteral(
+            "Bounds",
+            FL_LOG_LEVEL_INFO,
+            FL_LOG_PRIVACY_PUBLIC,
+            veryLongMessage,
+            &event
+        ) == 1)
+
+        let message = FLLogCTestEventMessage(&event).map(String.init(cString:))
+        #expect(message?.count == Int(FL_LOG_MAX_BUF) - 1)
+        #expect(message?.hasPrefix("[Bounds] [INFO] ") == true)
     }
 }
 
@@ -416,5 +526,29 @@ struct FLConfigTests {
         // Restore original value
         FLConfig.defaultSubsystem = originalSubsystem
         #expect(FLConfig.defaultSubsystem == originalSubsystem)
+    }
+
+    @Test("Concurrent FLConfig reads and writes remain atomic")
+    func testConcurrentDefaultSubsystemAccess() {
+        let originalSubsystem = FLConfig.defaultSubsystem
+        defer { FLConfig.defaultSubsystem = originalSubsystem }
+
+        let candidateValues = (0..<16).map {
+            "com.forgelogkit.concurrent.\($0)-" + String(repeating: "x", count: $0)
+        }
+        let validValues = Set(candidateValues + [originalSubsystem])
+        let unexpectedValues = UnexpectedValueRecorder()
+
+        DispatchQueue.concurrentPerform(iterations: 2_000) { index in
+            FLConfig.defaultSubsystem = candidateValues[index % candidateValues.count]
+            let observedValue = FLConfig.defaultSubsystem
+            if !validValues.contains(observedValue) {
+                unexpectedValues.record(observedValue)
+            }
+        }
+
+        FLConfig.defaultSubsystem = "com.forgelogkit.concurrent.final"
+        #expect(unexpectedValues.values.isEmpty)
+        #expect(FLConfig.defaultSubsystem == "com.forgelogkit.concurrent.final")
     }
 }
