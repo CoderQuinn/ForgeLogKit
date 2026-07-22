@@ -7,9 +7,12 @@
 
 #include "FLLogC.h"
 #include <os/log.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+
+#define FL_INTERNAL __attribute__((visibility("hidden")))
 
 /* ================= internal ================= */
 
@@ -52,6 +55,73 @@ static inline int _is_public(FLLogPrivacy privacy) {
     return privacy == FL_LOG_PRIVACY_PUBLIC;
 }
 
+/* These hidden functions are shared by production emission and the C test
+ * support target. They intentionally do not appear in the public header. */
+
+FL_INTERNAL uint8_t FLLogCInternalTypeForLevel(FLLogLevel level) {
+    return (uint8_t)_type_for_level(level);
+}
+
+FL_INTERNAL int FLLogCInternalIsPublic(FLLogPrivacy privacy) {
+    return _is_public(privacy);
+}
+
+FL_INTERNAL int FLLogCInternalFormatMessage(
+    char *buf,
+    size_t size,
+    const char *category,
+    FLLogLevel level,
+    const char *msg
+) {
+    if (!buf || size == 0 || !msg) return 0;
+
+    int n = snprintf(
+        buf,
+        size,
+        "[%s] [%s] %s",
+        category ? category : "unknown",
+        _level_string(level),
+        msg
+    );
+
+    buf[size - 1] = '\0';
+    return n >= 0;
+}
+
+FL_INTERNAL int FLLogCInternalVFormatMessage(
+    char *buf,
+    size_t size,
+    const char *category,
+    FLLogLevel level,
+    const char *fmt,
+    va_list ap
+) {
+    if (!buf || size == 0 || !fmt) return 0;
+
+    int n = snprintf(
+        buf,
+        size,
+        "[%s] [%s] ",
+        category ? category : "unknown",
+        _level_string(level)
+    );
+
+    if (n <= 0 || n >= (int)size) return 0;
+
+    va_list ap_copy;
+    va_copy(ap_copy, ap);
+    int message_length = vsnprintf(
+        buf + n,
+        size - (size_t)n,
+        fmt,
+        ap_copy
+    );
+    va_end(ap_copy);
+
+    buf[size - 1] = '\0';
+    return message_length >= 0;
+}
+
 /* ================= lifecycle ================= */
 
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
@@ -85,32 +155,26 @@ static void _emit(
     FLLogPrivacy privacy,
     const char *msg
 ) {
-    if (!msg) return;
-
     char buf[FL_LOG_MAX_BUF];
-
-    snprintf(
+    if (!FLLogCInternalFormatMessage(
         buf,
         sizeof(buf),
-        "[%s] [%s] %s",
         (h && h->category) ? h->category : "unknown",
-        _level_string(level),
+        level,
         msg
-    );
+    )) return;
 
-    buf[sizeof(buf) - 1] = '\0';
-
-    if (_is_public(privacy)) {
+    if (FLLogCInternalIsPublic(privacy)) {
         os_log_with_type(
             _log(h),
-            _type_for_level(level),
+            (os_log_type_t)FLLogCInternalTypeForLevel(level),
             "%{public}s",
             buf
         );
     } else {
         os_log_with_type(
             _log(h),
-            _type_for_level(level),
+            (os_log_type_t)FLLogCInternalTypeForLevel(level),
             "%{private}s",
             buf
         );
@@ -176,37 +240,27 @@ void FLLogCVLogfPrivacyH(
     const char *fmt,
     va_list ap
 ) {
-    if (!fmt) return;
-
     char buf[FL_LOG_MAX_BUF];
-    int n = snprintf(
+    if (!FLLogCInternalVFormatMessage(
         buf,
         sizeof(buf),
-        "[%s] [%s] ",
         (h && h->category) ? h->category : "unknown",
-        _level_string(level)
-    );
+        level,
+        fmt,
+        ap
+    )) return;
 
-    if (n <= 0 || n >= (int)sizeof(buf)) return;
-
-    va_list ap_copy;
-    va_copy(ap_copy, ap);
-    vsnprintf(buf + n, sizeof(buf) - (size_t)n, fmt, ap_copy);
-    va_end(ap_copy);
-
-    buf[sizeof(buf) - 1] = '\0';
-
-    if (_is_public(privacy)) {
+    if (FLLogCInternalIsPublic(privacy)) {
         os_log_with_type(
             _log(h),
-            _type_for_level(level),
+            (os_log_type_t)FLLogCInternalTypeForLevel(level),
             "%{public}s",
             buf
         );
     } else {
         os_log_with_type(
             _log(h),
-            _type_for_level(level),
+            (os_log_type_t)FLLogCInternalTypeForLevel(level),
             "%{private}s",
             buf
         );
