@@ -18,6 +18,10 @@ FLLogOCHandle FLLogOCCreate(
     );
 }
 
+void FLLogOCDestroy(FLLogOCHandle h) {
+    FLLogCDestroy((FLLogCHandle)h);
+}
+
 void FLLogOCInfoH(FLLogOCHandle h, const char *msg) {
     FLLogCInfoH((FLLogCHandle)h, msg);
 }
@@ -32,4 +36,26 @@ void FLLogOCWarnH(FLLogOCHandle h, const char *msg) {
 
 void FLLogOCErrorH(FLLogOCHandle h, const char *msg) {
     FLLogCErrorH((FLLogCHandle)h, msg);
+}
+
+void FLLogOCFaultH(FLLogOCHandle h, const char *msg) {
+    FLLogCFaultH((FLLogCHandle)h, msg);
+}
+
+BOOL FLLogOCIsEnabledH(FLLogOCHandle h, FLLogOCLevel level) {
+    return FLLogCIsEnabledH((FLLogCHandle)h, (FLLogLevel)level) != 0;
+}
+
+void FLLogOCLogH(
+    FLLogOCHandle h,
+    FLLogOCLevel level,
+    FLLogOCPrivacy privacy,
+    NSString *message
+) {
+    FLLogCLogH(
+        (FLLogCHandle)h,
+        (FLLogLevel)level,
+        (FLLogPrivacy)privacy,
+        message.UTF8String
+    );
 }

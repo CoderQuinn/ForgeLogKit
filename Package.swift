@@ -35,9 +35,20 @@ let package = Package(
             path: "Sources/ForgeLogKit"
         ),
 
+        .target(
+            name: "ForgeLogKitCTestSupport",
+            dependencies: ["ForgeLogKitC"],
+            path: "Tests/ForgeLogKitCTestSupport",
+            publicHeadersPath: "."
+        ),
+
         .testTarget(
             name: "ForgeLogKitTests",
-            dependencies: ["ForgeLogKit"],
+            dependencies: [
+                "ForgeLogKit",
+                "ForgeLogKitC",
+                "ForgeLogKitCTestSupport",
+            ],
             path: "Tests/ForgeLogKitTests"
         ),
     ]

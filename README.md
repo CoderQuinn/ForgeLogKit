@@ -17,6 +17,7 @@ dependencies: [
   .package(url: "https://github.com/CoderQuinn/ForgeLogKit.git", .upToNextMinor(from: "0.2.0")),
 ],
 ```
+
 ## Components
 
 ForgeLogKit is split into three layers:
@@ -24,6 +25,7 @@ ForgeLogKit is split into three layers:
 - **ForgeLogKitC**
   - Pure C wrapper around `os_log`
   - Safe handling for dynamic `printf`-style formats
+  - Explicit public/private privacy controls
   - Suitable for lwIP / C / performance-critical paths
 
 - **ForgeLogKitOC**
@@ -32,8 +34,9 @@ ForgeLogKit is split into three layers:
 
 - **ForgeLogKit**
   - Swift wrapper for `os_log`
-  - Simple, explicit APIs
-  - Optimized paths for `StaticString`
+  - Unified level and privacy APIs
+  - Concurrency-safe configuration and `Sendable` logger values
+  - Source-compatible `StaticString` and `String` convenience APIs
 
 ---
 
@@ -41,6 +44,7 @@ ForgeLogKit is split into three layers:
 
 - All logging ultimately goes through **`os_log`**
 - Dynamic format strings are handled safely via buffering
+- New unified logging calls default to private message data
 - No dependency on app-level context or business logic
 - Suitable for Network Extension (VPN) environments
 - No file logging, no async pipeline, no backend abstraction (by design)
@@ -51,11 +55,25 @@ ForgeLogKit is split into three layers:
 
 ```swift
 let log = FLLog(category: "network")
+let path = "/Users/example/Documents"
 
 log.info("connected")
 log.debug("state updated")
 log.error("connection failed")
-// StaticString variants are zero-cost; String variants have explicit cost.
+log.fault("unrecoverable state")
+// StaticString and String convenience overloads remain available.
+
+// The unified API lazily evaluates messages and defaults to private data.
+log.log(.info, "selected path: \(path)")
+log.log(.error, "cleanup failed", privacy: .public)
+
+// Privacy-aware convenience overloads are also available.
+log.info("user-selected path: \(path)", privacy: .private)
+```
+
+The original `info(_:)`, `debug(_:)`, `warn(_:)`, and `error(_:)`
+convenience methods keep their 0.2 public-message behavior for compatibility.
+Use `log(_:_:privacy:)` or an explicit privacy overload for sensitive data.
 
 ---
 
@@ -65,6 +83,9 @@ log.error("connection failed")
 FLLogOCHandle h = FLLogOCCreate(nil, @"network");
 FLLogOCInfoH(h, "connected");
 FLLogOCErrorH(h, "connection failed");
+FLLogOCLogH(h, FLLogOCLevelInfo, FLLogOCPrivacyPrivate,
+            @"user-selected path");
+FLLogOCDestroy(h);
 ```
 
 ---
@@ -74,15 +95,18 @@ FLLogOCErrorH(h, "connection failed");
 ```c
 FLLogCHandle h = FLLogCCreate(NULL, "lwip");
 FLLogCLogfH(h, FL_LOG_LEVEL_DEBUG, "recv len=%u", len);
+FLLogCLogH(h, FL_LOG_LEVEL_INFO, FL_LOG_PRIVACY_PRIVATE,
+           "user-selected path");
+FLLogCDestroy(h);
 ```
 
 ---
 
 ## Versioning
 
-**Current version:** 0.2.0
+**Latest tagged version:** 0.2.0
 
-- APIs are usable and stable for intended use cases
+- Existing 0.2 convenience APIs retain their public-message behavior
 - Internal behavior may evolve
 - No API compatibility guarantee yet
 
@@ -90,4 +114,4 @@ FLLogCLogfH(h, FL_LOG_LEVEL_DEBUG, "recv len=%u", len);
 
 ## License
 
-Apache License 2.0
+[Apache License 2.0](LICENSE)

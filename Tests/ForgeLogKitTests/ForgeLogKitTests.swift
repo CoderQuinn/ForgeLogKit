@@ -1,4 +1,6 @@
 @testable import ForgeLogKit
+import ForgeLogKitC
+import ForgeLogKitCTestSupport
 import Testing
 import os.log
 
@@ -99,6 +101,29 @@ struct FLLogTests {
         logger.error("Error message" as String)
         
         #expect(logger.category == "Test")
+    }
+
+    @Test("Fault log includes FAULT level prefix")
+    func testFaultLogLevel() throws {
+        let logger = FLLog(category: "Test")
+
+        logger.fault("Fault message")
+        logger.fault("Fault message" as String)
+
+        #expect(logger.category == "Test")
+    }
+
+    @Test("Privacy-aware API supports every level")
+    func testPrivacyAwareAPI() throws {
+        let logger = FLLog(category: "Privacy")
+
+        logger.log(.debug, "private debug")
+        logger.info("private info", privacy: .private)
+        logger.warn("public warning", privacy: .public)
+        logger.error("private error", privacy: .private)
+        logger.fault("public fault", privacy: .public)
+
+        #expect(FLLogLevel.allCases.count == 5)
     }
     
     // MARK: - Initialization Tests
@@ -260,10 +285,8 @@ struct FLLogCTests {
     func testLogfWithFormatString() throws {
         let handle = FLLogCCreate("com.test", "Test")
         #expect(handle != nil)
-        
-        FLLogCLogfH(handle, FL_LOG_LEVEL_INFO, "Value: %d", 42)
-        FLLogCLogfH(handle, FL_LOG_LEVEL_DEBUG, "String: %s", "test")
-        FLLogCLogfH(handle, FL_LOG_LEVEL_WARN, "Float: %.2f", 3.14)
+
+        FLLogCTestFormatted(handle)
         
         FLLogCDestroy(handle)
     }
@@ -274,8 +297,25 @@ struct FLLogCTests {
         #expect(handle != nil)
         
         // Should not crash
-        FLLogCLogfH(handle, FL_LOG_LEVEL_INFO, nil)
+        FLLogCTestNullFormat(handle)
         
+        FLLogCDestroy(handle)
+    }
+
+    @Test("Privacy-aware C APIs support private and public messages")
+    func testPrivacyAwareCAPI() throws {
+        let handle = FLLogCCreate("com.test", "Privacy")
+        #expect(handle != nil)
+
+        FLLogCLogH(
+            handle,
+            FL_LOG_LEVEL_INFO,
+            FL_LOG_PRIVACY_PRIVATE,
+            "private path"
+        )
+        FLLogCTestPrivateFormatted(handle)
+        _ = FLLogCIsEnabledH(handle, FL_LOG_LEVEL_INFO)
+
         FLLogCDestroy(handle)
     }
     
@@ -333,12 +373,7 @@ struct FLLogCTests {
         let handle = FLLogCCreate("com.test", "Test")
         #expect(handle != nil)
         
-        // Test all log levels through logf
-        FLLogCLogfH(handle, FL_LOG_LEVEL_DEBUG, "Debug level test")
-        FLLogCLogfH(handle, FL_LOG_LEVEL_INFO, "Info level test")
-        FLLogCLogfH(handle, FL_LOG_LEVEL_WARN, "Warn level test")
-        FLLogCLogfH(handle, FL_LOG_LEVEL_ERROR, "Error level test")
-        FLLogCLogfH(handle, FL_LOG_LEVEL_FAULT, "Fault level test")
+        FLLogCTestAllLevels(handle)
         
         FLLogCDestroy(handle)
     }
@@ -363,7 +398,7 @@ struct FLLogCTests {
 }
 
 /// Tests for FLConfig
-@Suite("FLConfig Tests")
+@Suite("FLConfig Tests", .serialized)
 struct FLConfigTests {
     
     @Test("Default subsystem is set correctly")
