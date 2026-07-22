@@ -1,5 +1,7 @@
 # ForgeLogKit
 
+[![CI / Tests](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml)
+
 ForgeLogKit is a lightweight logging infrastructure built on top of `os_log`,
 designed for use across **Swift, Objective-C, and pure C** code.
 

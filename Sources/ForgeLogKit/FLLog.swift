@@ -39,9 +39,41 @@ public enum FLLogPrivacy: Sendable {
     case `public`
 }
 
+/// Internal indirection that keeps Unified Logging observable in unit tests
+/// without exposing a production hook as public API.
+internal struct FLLogBackend: @unchecked Sendable {
+    let isEnabled: (OSLogType) -> Bool
+    let emit: (OSLogType, FLLogPrivacy, String) -> Void
+
+    static func unifiedLogging(_ log: OSLog) -> Self {
+        Self(
+            isEnabled: { log.isEnabled(type: $0) },
+            emit: { type, privacy, message in
+                switch privacy {
+                case .private:
+                    os_log(
+                        "%{private}@",
+                        log: log,
+                        type: type,
+                        message
+                    )
+                case .public:
+                    os_log(
+                        "%{public}@",
+                        log: log,
+                        type: type,
+                        message
+                    )
+                }
+            }
+        )
+    }
+}
+
 /// A lightweight, concurrency-safe wrapper around Unified Logging.
 public struct FLLog: Sendable {
-    private let log: OSLog
+    private let backend: FLLogBackend
+    internal let subsystem: String
     internal let category: String
 
     public init(
@@ -50,8 +82,19 @@ public struct FLLog: Sendable {
     ) {
         let sub = subsystem ?? FLConfig.defaultSubsystem
         let cat = category ?? "Default"
+        self.subsystem = sub
         self.category = cat
-        log = OSLog(subsystem: sub, category: cat)
+        backend = .unifiedLogging(OSLog(subsystem: sub, category: cat))
+    }
+
+    internal init(
+        subsystem: String = "com.forgelogkit.tests",
+        category: String,
+        backend: FLLogBackend
+    ) {
+        self.subsystem = subsystem
+        self.category = category
+        self.backend = backend
     }
 
     // MARK: - Unified API
@@ -59,7 +102,7 @@ public struct FLLog: Sendable {
     /// Returns whether Unified Logging currently enables the requested level.
     @inline(__always)
     public func isEnabled(for level: FLLogLevel) -> Bool {
-        log.isEnabled(type: level.osLogType)
+        backend.isEnabled(level.osLogType)
     }
 
     /// Logs a lazily evaluated message. New call sites default to private data.
@@ -192,21 +235,6 @@ public struct FLLog: Sendable {
         privacy: FLLogPrivacy
     ) {
         let formattedMessage = prefix(level) + message
-        switch privacy {
-        case .private:
-            os_log(
-                "%{private}@",
-                log: log,
-                type: level.osLogType,
-                formattedMessage
-            )
-        case .public:
-            os_log(
-                "%{public}@",
-                log: log,
-                type: level.osLogType,
-                formattedMessage
-            )
-        }
+        backend.emit(level.osLogType, privacy, formattedMessage)
     }
 }
