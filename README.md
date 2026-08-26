@@ -1,5 +1,10 @@
 # ForgeLogKit
 
+<p align="center">
+  <strong>English</strong> |
+  <a href="README.zh-CN.md">简体中文</a>
+</p>
+
 [![CI / Tests](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/CoderQuinn/ForgeLogKit)](LICENSE)
 
