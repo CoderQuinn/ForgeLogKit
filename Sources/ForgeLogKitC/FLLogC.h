@@ -8,6 +8,7 @@
 //
 
 #pragma once
+#include <stddef.h>
 #include <stdarg.h>
 
 #ifdef __cplusplus
@@ -40,6 +41,18 @@ typedef enum {
     FL_LOG_PRIVACY_PRIVATE = 0,
     FL_LOG_PRIVACY_PUBLIC  = 1,
 } FLLogPrivacy;
+
+/*
+ * Process-wide default subsystem shared by the Swift, C, and Objective-C APIs.
+ *
+ * Set accepts a non-NULL UTF-8 string and returns non-zero on success. Get
+ * returns the required buffer size, including the trailing NUL byte, and
+ * writes a NUL-terminated value when buffer is non-NULL and capacity is
+ * greater than zero. Access is thread-safe. Changes apply only to handles
+ * created after the update.
+ */
+int FLLogCSetDefaultSubsystem(const char *subsystem);
+size_t FLLogCGetDefaultSubsystem(char *buffer, size_t capacity);
 
 /*
  * Create a log handle
