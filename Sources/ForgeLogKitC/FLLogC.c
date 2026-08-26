@@ -158,17 +158,12 @@ size_t FLLogCGetDefaultSubsystem(char *buffer, size_t capacity) {
     if (pthread_mutex_lock(&FLDefaultSubsystemLock) != 0) return 0;
 
     const char *subsystem = FLDefaultSubsystemLocked();
-    size_t requiredCapacity = strlen(subsystem) + 1;
-    if (buffer && capacity > 0) {
-        size_t copyLength = requiredCapacity < capacity
-            ? requiredCapacity
-            : capacity;
-        memcpy(buffer, subsystem, copyLength - 1);
-        buffer[copyLength - 1] = '\0';
-    }
+    int writtenLength = buffer && capacity > 0
+        ? snprintf(buffer, capacity, "%s", subsystem)
+        : snprintf(NULL, 0, "%s", subsystem);
 
     pthread_mutex_unlock(&FLDefaultSubsystemLock);
-    return requiredCapacity;
+    return writtenLength < 0 ? 0 : (size_t)writtenLength + 1;
 }
 
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
