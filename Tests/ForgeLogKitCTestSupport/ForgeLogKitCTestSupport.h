@@ -36,6 +36,8 @@ int FLLogCTestPrepareFormattedValues(
 );
 
 int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event);
+int FLLogCTestRejectsInvalidLiteralInputs(void);
+int FLLogCTestRejectsTinyFormattedBuffer(void);
 const char *FLLogCTestEventMessage(const FLLogCTestEvent *event);
 unsigned char FLLogCTestEventLogType(const FLLogCTestEvent *event);
 int FLLogCTestEventIsPublic(const FLLogCTestEvent *event);

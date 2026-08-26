@@ -48,6 +48,7 @@ let package = Package(
                 "ForgeLogKit",
                 "ForgeLogKitC",
                 "ForgeLogKitCTestSupport",
+                "ForgeLogKitOC",
             ],
             path: "Tests/ForgeLogKitTests"
         ),

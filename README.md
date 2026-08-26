@@ -1,7 +1,6 @@
 # ForgeLogKit
 
 [![CI / Tests](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https%3A%2F%2Fraw.githubusercontent.com%2FCoderQuinn%2FForgeLogKit%2Fbadges%2Fcoverage.json)](https://github.com/CoderQuinn/ForgeLogKit/actions/workflows/ci.yml)
 [![License](https://img.shields.io/github/license/CoderQuinn/ForgeLogKit)](LICENSE)
 
 ForgeLogKit is a lightweight logging infrastructure built on top of `os_log`,
@@ -113,6 +112,36 @@ FLLogCDestroy(h);
 - Existing 0.2 convenience APIs retain their public-message behavior
 - Internal behavior may evolve
 - No API compatibility guarantee yet
+
+---
+
+## Development and CI
+
+Run the same macOS gate used by GitHub Actions from the repository root:
+
+```sh
+./Scripts/ci.sh
+```
+
+The gate resets and resolves package dependencies, prints the active Swift,
+Xcode, and macOS toolchains, builds and tests Debug and Release configurations,
+checks complete Swift concurrency diagnostics, and enforces production coverage.
+
+To run only the coverage gate:
+
+```sh
+./Scripts/coverage.sh
+```
+
+Coverage includes every instrumented file under `Sources/` in the Swift
+`ForgeLogKit`, C `ForgeLogKitC`, and Objective-C `ForgeLogKitOC` targets. Test
+and test-support sources are excluded. The total production line-coverage
+threshold is 95%; the script writes a per-target and per-file summary to
+`.build/coverage/production-summary.md`.
+
+The Objective-C adapter and Apple Unified Logging APIs require a macOS/Xcode
+host, so this first required gate intentionally uses one stable macOS runner
+instead of a cross-platform matrix.
 
 ---
 
