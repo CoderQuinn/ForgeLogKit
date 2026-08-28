@@ -143,6 +143,52 @@ int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event) {
     );
 }
 
+int FLLogCTestRejectsInvalidLiteralInputs(void) {
+    char buffer[FL_LOG_MAX_BUF];
+    return
+        FLLogCInternalFormatMessage(
+            0,
+            sizeof(buffer),
+            "Invalid",
+            FL_LOG_LEVEL_INFO,
+            "message"
+        ) == 0 &&
+        FLLogCInternalFormatMessage(
+            buffer,
+            0,
+            "Invalid",
+            FL_LOG_LEVEL_INFO,
+            "message"
+        ) == 0 &&
+        FLLogCInternalFormatMessage(
+            buffer,
+            sizeof(buffer),
+            "Invalid",
+            FL_LOG_LEVEL_INFO,
+            0
+        ) == 0;
+}
+
+static int FLLogCTestFormatTinyBuffer(const char *fmt, ...) {
+    char buffer[8];
+    va_list ap;
+    va_start(ap, fmt);
+    int result = FLLogCInternalVFormatMessage(
+        buffer,
+        sizeof(buffer),
+        "CategoryTooLarge",
+        FL_LOG_LEVEL_INFO,
+        fmt,
+        ap
+    );
+    va_end(ap);
+    return result;
+}
+
+int FLLogCTestRejectsTinyFormattedBuffer(void) {
+    return FLLogCTestFormatTinyBuffer("message") == 0;
+}
+
 const char *FLLogCTestEventMessage(const FLLogCTestEvent *event) {
     return event ? event->message : 0;
 }

@@ -164,15 +164,21 @@ struct FLLogTests {
         let recorder = LogRecorder()
         let logger = FLLog(category: "Compatibility", backend: recorder.backend())
 
-        logger.debug("static debug")
+        let staticDebug: StaticString = "static debug"
+        let staticInfo: StaticString = "static info"
+        let staticWarning: StaticString = "static warning"
+        let staticError: StaticString = "static error"
+        let staticFault: StaticString = "static fault"
+
+        logger.debug(staticDebug)
         logger.debug("dynamic debug" as String)
-        logger.info("static info")
+        logger.info(staticInfo)
         logger.info("dynamic info" as String)
-        logger.warn("static warning")
+        logger.warn(staticWarning)
         logger.warn("dynamic warning" as String)
-        logger.error("static error")
+        logger.error(staticError)
         logger.error("dynamic error" as String)
-        logger.fault("static fault")
+        logger.fault(staticFault)
         logger.fault("dynamic fault" as String)
 
         let events = recorder.events
@@ -184,6 +190,60 @@ struct FLLogTests {
             OSLogType.error.rawValue, OSLogType.error.rawValue,
             OSLogType.fault.rawValue, OSLogType.fault.rawValue,
         ])
+        #expect(events.map(\.message) == [
+            "[Compatibility][DEBUG] static debug",
+            "[Compatibility][DEBUG] dynamic debug",
+            "[Compatibility][INFO] static info",
+            "[Compatibility][INFO] dynamic info",
+            "[Compatibility][WARN] static warning",
+            "[Compatibility][WARN] dynamic warning",
+            "[Compatibility][ERROR] static error",
+            "[Compatibility][ERROR] dynamic error",
+            "[Compatibility][FAULT] static fault",
+            "[Compatibility][FAULT] dynamic fault",
+        ])
+    }
+
+    @Test("Privacy-aware convenience methods preserve level and privacy")
+    func testPrivacyAwareConvenienceRouting() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "PrivacyAPI", backend: recorder.backend())
+
+        logger.debug("debug", privacy: .public)
+        logger.info("info", privacy: .private)
+        logger.warn("warn", privacy: .public)
+        logger.error("error", privacy: .private)
+        logger.fault("fault", privacy: .public)
+
+        let events = recorder.events
+        #expect(events.map(\.type.rawValue) == [
+            OSLogType.debug.rawValue,
+            OSLogType.info.rawValue,
+            OSLogType.default.rawValue,
+            OSLogType.error.rawValue,
+            OSLogType.fault.rawValue,
+        ])
+        #expect(events.map(\.privacy) == [
+            "public", "private", "public", "private", "public",
+        ])
+        #expect(events.map(\.message) == [
+            "[PrivacyAPI][DEBUG] debug",
+            "[PrivacyAPI][INFO] info",
+            "[PrivacyAPI][WARN] warn",
+            "[PrivacyAPI][ERROR] error",
+            "[PrivacyAPI][FAULT] fault",
+        ])
+    }
+
+    @Test("Unified logging backend accepts enabled, public, and private paths")
+    func testUnifiedLoggingBackendSmoke() {
+        let backend = FLLogBackend.unifiedLogging(
+            OSLog(subsystem: "com.forgelogkit.tests", category: "Backend")
+        )
+
+        _ = backend.isEnabled(.info)
+        backend.emit(.info, .public, "public smoke")
+        backend.emit(.error, .private, "private smoke")
     }
 
     @Test("Disabled levels do not evaluate autoclosures")
@@ -424,6 +484,53 @@ struct FLLogCTests {
             #expect(FLLogCTestEventIsPublic(&event) == isPublic)
         }
     }
+
+    @Test("Unknown C levels and missing categories use safe fallbacks")
+    func testUnknownLevelAndCategoryFallbacks() {
+        var event = FLLogCTestEvent()
+        let unknownLevel = ForgeLogKitC.FLLogLevel(rawValue: 99)
+        let unknownPrivacy = ForgeLogKitC.FLLogPrivacy(rawValue: 99)
+
+        #expect(FLLogCTestPrepareLiteral(
+            nil,
+            unknownLevel,
+            unknownPrivacy,
+            "payload",
+            &event
+        ) == 1)
+        #expect(FLLogCTestEventMessage(&event).map(String.init(cString:)) ==
+            "[unknown] [UNKNOWN] payload")
+        #expect(FLLogCTestEventLogType(&event) == OSLogType.default.rawValue)
+        #expect(FLLogCTestEventIsPublic(&event) == 0)
+    }
+
+    @Test("Explicit C logging covers enabled, privacy, formatting, and null formats")
+    func testExplicitCLoggingPaths() {
+        let handle = FLLogCCreate("com.test", "Explicit")
+        #expect(handle != nil)
+
+        _ = FLLogCIsEnabledH(handle, FL_LOG_LEVEL_INFO)
+        FLLogCLogH(
+            handle,
+            FL_LOG_LEVEL_ERROR,
+            FL_LOG_PRIVACY_PRIVATE,
+            "private message"
+        )
+        FLLogCTestFormatted(handle)
+        FLLogCTestPrivateFormatted(handle)
+        FLLogCTestNullFormat(handle)
+
+        FLLogCDestroy(handle)
+    }
+
+    @Test("C format helpers reject invalid inputs and insufficient prefix space")
+    func testFormattingBoundaries() {
+        #expect(FLLogCTestRejectsInvalidLiteralInputs() == 1)
+        #expect(FLLogCTestRejectsTinyFormattedBuffer() == 1)
+        #expect(FLLogCTestEventMessage(nil) == nil)
+        #expect(FLLogCTestEventLogType(nil) == 0)
+        #expect(FLLogCTestEventIsPublic(nil) == 0)
+    }
     
     // MARK: - Edge Cases
     
@@ -522,6 +629,9 @@ struct FLConfigTests {
         
         FLConfig.defaultSubsystem = "com.custom.subsystem"
         #expect(FLConfig.defaultSubsystem == "com.custom.subsystem")
+        #expect(FLLog().subsystem == "com.custom.subsystem")
+        #expect(FLLog(subsystem: "com.explicit.subsystem").subsystem ==
+            "com.explicit.subsystem")
         
         // Restore original value
         FLConfig.defaultSubsystem = originalSubsystem
