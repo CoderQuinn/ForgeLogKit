@@ -82,3 +82,28 @@ void FLLogOCLogH(
         message.UTF8String
     );
 }
+
+void FLLogOCLogStructuredH(
+    FLLogOCHandle h,
+    FLLogOCLevel level,
+    FLLogOCPrivacy privacy,
+    NSString *component,
+    NSString *phase,
+    NSString *errorCode,
+    NSString *correlationID,
+    NSString *message
+) {
+    FLLogCFields fields = {
+        .component = component.UTF8String,
+        .phase = phase.UTF8String,
+        .errorCode = errorCode.UTF8String,
+        .correlationID = correlationID.UTF8String,
+    };
+    FLLogCLogStructuredH(
+        (FLLogCHandle)h,
+        (FLLogLevel)level,
+        (FLLogPrivacy)privacy,
+        &fields,
+        message.UTF8String
+    );
+}

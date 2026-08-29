@@ -56,4 +56,18 @@ FOUNDATION_EXPORT void FLLogOCLogH(
     NSString *_Nullable message
 );
 
+/// Emit a validated structured event using the shared stable field order.
+/// component is required; the other fields are optional. Every supplied field
+/// must contain 1...64 ASCII identifier bytes. Invalid input fails closed.
+FOUNDATION_EXPORT void FLLogOCLogStructuredH(
+    FLLogOCHandle _Nullable h,
+    FLLogOCLevel level,
+    FLLogOCPrivacy privacy,
+    NSString *component,
+    NSString *_Nullable phase,
+    NSString *_Nullable errorCode,
+    NSString *_Nullable correlationID,
+    NSString *_Nullable message
+);
+
 NS_ASSUME_NONNULL_END

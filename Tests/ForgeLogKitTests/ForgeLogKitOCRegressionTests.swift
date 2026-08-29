@@ -28,6 +28,26 @@ struct ForgeLogKitOCRegressionTests {
         FLLogOCLogH(handle, info, publicPrivacy, "public message")
         FLLogOCLogH(handle, error, privatePrivacy, "private message")
         FLLogOCLogH(handle, info, publicPrivacy, nil)
+        FLLogOCLogStructuredH(
+            handle,
+            error,
+            privatePrivacy,
+            "packet-tunnel",
+            "connect",
+            "TCP_TIMEOUT",
+            "flow-42",
+            "structured smoke"
+        )
+        FLLogOCLogStructuredH(
+            handle,
+            info,
+            publicPrivacy,
+            "invalid component",
+            nil,
+            nil,
+            nil,
+            "must not emit"
+        )
 
         FLLogOCDestroy(handle)
         FLLogOCDestroy(nil)

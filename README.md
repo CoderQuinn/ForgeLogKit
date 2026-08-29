@@ -52,6 +52,7 @@ ForgeLogKit is split into three layers:
 
 - All logging ultimately goes through **`os_log`**
 - Swift, C, and Objective-C share one process-wide default subsystem
+- Swift, C, and Objective-C share one stable structured-field serialization
 - Dynamic format strings are handled safely via buffering
 - Swift, C, and Objective-C messages share one content-redaction pass before emission
 - New unified logging calls default to private message data
@@ -83,6 +84,14 @@ log.log(.error, "cleanup failed", privacy: .public)
 
 // Privacy-aware convenience overloads are also available.
 log.info("user-selected path: \(path)", privacy: .private)
+
+let fields = FLLogFields(
+  component: "packet-tunnel",
+  phase: "connect",
+  errorCode: "TCP_TIMEOUT",
+  correlationID: "flow-42"
+)!
+log.log(.error, "connection failed", fields: fields)
 ```
 
 The original `info(_:)`, `debug(_:)`, `warn(_:)`, and `error(_:)`
@@ -90,6 +99,23 @@ convenience methods keep their 0.2 public-message behavior for compatibility.
 Their content is still redacted before emission. Use `log(_:_:privacy:)` or an
 explicit privacy overload when the entire remaining message should also use
 Unified Logging's private routing.
+
+## Structured fields
+
+Structured events use the same fixed field names and order from Swift, C, and
+Objective-C:
+
+```text
+[network] [ERROR] [component=packet-tunnel][phase=connect][error_code=TCP_TIMEOUT][correlation_id=flow-42] connection failed
+```
+
+`component` is required; `phase`, `error_code`, and `correlation_id` are
+optional and omitted when absent. Each supplied value must contain 1...64 ASCII
+identifier bytes from letters, digits, `.`, `_`, `:`, or `-`. Inputs with
+whitespace, delimiters, empty values, or longer identifiers fail closed rather
+than creating ambiguous fields. These fields are product-independent
+correlation identifiers, not a place for raw configuration or secrets. Message
+content still passes through default redaction before emission.
 
 ## Default secret redaction
 
@@ -124,6 +150,9 @@ FLLogOCInfoH(h, "connected");
 FLLogOCErrorH(h, "connection failed");
 FLLogOCLogH(h, FLLogOCLevelInfo, FLLogOCPrivacyPrivate,
             @"user-selected path");
+FLLogOCLogStructuredH(h, FLLogOCLevelError, FLLogOCPrivacyPrivate,
+                     @"packet-tunnel", @"connect", @"TCP_TIMEOUT",
+                     @"flow-42", @"connection failed");
 FLLogOCDestroy(h);
 ```
 
@@ -139,6 +168,14 @@ FLLogCHandle h = FLLogCCreate(NULL, "lwip");
 FLLogCLogfH(h, FL_LOG_LEVEL_DEBUG, "recv len=%u", len);
 FLLogCLogH(h, FL_LOG_LEVEL_INFO, FL_LOG_PRIVACY_PRIVATE,
            "user-selected path");
+FLLogCFields fields = {
+    .component = "packet-tunnel",
+    .phase = "connect",
+    .errorCode = "TCP_TIMEOUT",
+    .correlationID = "flow-42",
+};
+FLLogCLogStructuredH(h, FL_LOG_LEVEL_ERROR, FL_LOG_PRIVACY_PRIVATE,
+                     &fields, "connection failed");
 FLLogCDestroy(h);
 ```
 

@@ -112,6 +112,53 @@ private func redactWithC(
     }
 }
 
+private func formatStructuredWithC(
+    category: String?,
+    level: ForgeLogKitC.FLLogLevel,
+    fields: FLLogFields,
+    message: String,
+    capacity requestedCapacity: Int? = nil
+) -> (requiredCapacity: Int, output: String) {
+    func withCategory<Result>(
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let category else { return body(nil) }
+        return category.withCString(body)
+    }
+
+    return fields.withCFields { fieldsPointer in
+        withCategory { categoryPointer in
+            message.withCString { messagePointer in
+                let requiredCapacity = FLLogCFormatStructuredMessage(
+                    categoryPointer,
+                    level,
+                    fieldsPointer,
+                    messagePointer,
+                    nil,
+                    0
+                )
+                let capacity = requestedCapacity ?? requiredCapacity
+                var buffer = [CChar](repeating: 0, count: capacity)
+                let returnedCapacity = buffer.withUnsafeMutableBufferPointer {
+                    FLLogCFormatStructuredMessage(
+                        categoryPointer,
+                        level,
+                        fieldsPointer,
+                        messagePointer,
+                        $0.baseAddress,
+                        $0.count
+                    )
+                }
+                let output = buffer.isEmpty ? "" : buffer.withUnsafeBufferPointer {
+                    String(cString: $0.baseAddress!)
+                }
+                #expect(returnedCapacity == requiredCapacity)
+                return (requiredCapacity, output)
+            }
+        }
+    }
+}
+
 private func containsCanary(_ text: String, canaries: [String]) -> Bool {
     canaries.contains { text.contains($0) }
 }
@@ -202,6 +249,62 @@ struct FLLogTests {
             "[Privacy][INFO] visible",
             "[Privacy][ERROR] secret",
         ])
+    }
+
+    @Test("Structured fields validate identifiers and preserve stable order")
+    func testStructuredFieldsAndFormatting() {
+        let fields = FLLogFields(
+            component: "packet-tunnel",
+            phase: "connect",
+            errorCode: "TCP_TIMEOUT",
+            correlationID: "flow:42"
+        )
+        #expect(fields != nil)
+        #expect(FLLogFields(component: "") == nil)
+        #expect(FLLogFields(component: String(repeating: "x", count: 65)) == nil)
+        #expect(FLLogFields(component: "packet tunnel") == nil)
+        #expect(FLLogFields(component: "packet-tunnel", phase: "connect]") == nil)
+        #expect(FLLogFields(component: "隧道") == nil)
+
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "Routing", backend: recorder.backend())
+        let canary = ["structured", "-secret"].joined()
+        for level in FLLogLevel.allCases {
+            logger.log(
+                level,
+                "token=\(canary)",
+                fields: fields!,
+                privacy: .public
+            )
+        }
+        let longPrefix = String(repeating: "x", count: Int(FL_LOG_MAX_BUF) + 16)
+        logger.log(
+            .error,
+            "\(longPrefix) token=\(canary)",
+            fields: FLLogFields(component: "packet-tunnel")!
+        )
+
+        let events = recorder.events
+        #expect(events.count == 6)
+        #expect(events.dropLast().map(\.privacy) ==
+            Array(repeating: "public", count: 5))
+        #expect(events.dropLast().map(\.message) == [
+            "[Routing] [DEBUG] [component=packet-tunnel][phase=connect]" +
+                "[error_code=TCP_TIMEOUT][correlation_id=flow:42] token=<redacted>",
+            "[Routing] [INFO] [component=packet-tunnel][phase=connect]" +
+                "[error_code=TCP_TIMEOUT][correlation_id=flow:42] token=<redacted>",
+            "[Routing] [WARN] [component=packet-tunnel][phase=connect]" +
+                "[error_code=TCP_TIMEOUT][correlation_id=flow:42] token=<redacted>",
+            "[Routing] [ERROR] [component=packet-tunnel][phase=connect]" +
+                "[error_code=TCP_TIMEOUT][correlation_id=flow:42] token=<redacted>",
+            "[Routing] [FAULT] [component=packet-tunnel][phase=connect]" +
+                "[error_code=TCP_TIMEOUT][correlation_id=flow:42] token=<redacted>",
+        ])
+        #expect(events.last?.privacy == "private")
+        #expect(events.last?.message ==
+            "[Routing] [ERROR] [component=packet-tunnel] " +
+                longPrefix + " token=<redacted>")
+        #expect(events.allSatisfy { !$0.message.contains(canary) })
     }
 
     @Test("0.2 convenience overloads keep public routing")
@@ -302,6 +405,11 @@ struct FLLogTests {
 
         logger.log(.debug, probe.evaluate())
         logger.info(probe.evaluate(), privacy: .private)
+        logger.log(
+            .error,
+            probe.evaluate(),
+            fields: FLLogFields(component: "runtime")!
+        )
 
         #expect(logger.isEnabled(for: .debug) == false)
         #expect(probe.evaluationCount == 0)
@@ -618,6 +726,145 @@ struct FLLogCTests {
             "[Formatting] [ERROR] count=42 name=worker ratio=3.14")
         #expect(FLLogCTestEventLogType(&event) == OSLogType.error.rawValue)
         #expect(FLLogCTestEventIsPublic(&event) == 0)
+    }
+
+    @Test("C structured formatter shares field order and redaction")
+    func testCStructuredFormatting() {
+        let fields = FLLogFields(
+            component: "dns",
+            phase: "upstream-query",
+            errorCode: "TIMEOUT",
+            correlationID: "request-7"
+        )!
+        let canary = ["c-structured", "-secret"].joined()
+        let full = formatStructuredWithC(
+            category: "Resolver",
+            level: FL_LOG_LEVEL_ERROR,
+            fields: fields,
+            message: "password=\(canary)"
+        )
+        let minimal = formatStructuredWithC(
+            category: nil,
+            level: ForgeLogKitC.FLLogLevel(rawValue: 99),
+            fields: FLLogFields(component: "dns")!,
+            message: "failed"
+        )
+        let truncated = formatStructuredWithC(
+            category: "Resolver",
+            level: FL_LOG_LEVEL_ERROR,
+            fields: fields,
+            message: "password=\(canary)",
+            capacity: 16
+        )
+
+        #expect(full.output ==
+            "[Resolver] [ERROR] [component=dns][phase=upstream-query]" +
+                "[error_code=TIMEOUT][correlation_id=request-7] password=<redacted>")
+        #expect(!full.output.contains(canary))
+        #expect(minimal.output == "[unknown] [UNKNOWN] [component=dns] failed")
+        #expect(truncated.requiredCapacity == full.requiredCapacity)
+        #expect(truncated.output == "[Resolver] [ERR")
+
+        let handle = FLLogCCreate("com.test", "Structured")
+        fields.withCFields { fieldsPointer in
+            FLLogCLogStructuredH(
+                handle,
+                FL_LOG_LEVEL_ERROR,
+                FL_LOG_PRIVACY_PRIVATE,
+                fieldsPointer,
+                "structured smoke"
+            )
+        }
+        FLLogCDestroy(handle)
+    }
+
+    @Test("C structured formatter rejects malformed fields and messages")
+    func testCStructuredFormattingBoundaries() {
+        var buffer = [CChar](repeating: 1, count: 64)
+
+        let nullFieldsResult = buffer.withUnsafeMutableBufferPointer {
+            FLLogCFormatStructuredMessage(
+                "Boundary",
+                FL_LOG_LEVEL_INFO,
+                nil,
+                "message",
+                $0.baseAddress,
+                $0.count
+            )
+        }
+        #expect(nullFieldsResult == 0)
+        #expect(buffer[0] == 0)
+
+        "bad component".withCString { invalidComponent in
+            var fields = FLLogCFields(
+                component: invalidComponent,
+                phase: nil,
+                errorCode: nil,
+                correlationID: nil
+            )
+            buffer[0] = 1
+            let result = buffer.withUnsafeMutableBufferPointer {
+                FLLogCFormatStructuredMessage(
+                    "Boundary",
+                    FL_LOG_LEVEL_INFO,
+                    &fields,
+                    "message",
+                    $0.baseAddress,
+                    $0.count
+                )
+            }
+            #expect(result == 0)
+            #expect(buffer[0] == 0)
+        }
+
+        "dns".withCString { component in
+            "".withCString { emptyPhase in
+                var fields = FLLogCFields(
+                    component: component,
+                    phase: emptyPhase,
+                    errorCode: nil,
+                    correlationID: nil
+                )
+                buffer[0] = 1
+                let result = buffer.withUnsafeMutableBufferPointer {
+                    FLLogCFormatStructuredMessage(
+                        "Boundary",
+                        FL_LOG_LEVEL_INFO,
+                        &fields,
+                        "message",
+                        $0.baseAddress,
+                        $0.count
+                    )
+                }
+                #expect(result == 0)
+                #expect(buffer[0] == 0)
+            }
+        }
+
+        let fields = FLLogFields(component: "dns")!
+        fields.withCFields { fieldsPointer in
+            buffer[0] = 1
+            let nullMessageResult = buffer.withUnsafeMutableBufferPointer {
+                FLLogCFormatStructuredMessage(
+                    "Boundary",
+                    FL_LOG_LEVEL_INFO,
+                    fieldsPointer,
+                    nil,
+                    $0.baseAddress,
+                    $0.count
+                )
+            }
+            #expect(nullMessageResult == 0)
+            #expect(buffer[0] == 0)
+            #expect(FLLogCFormatStructuredMessage(
+                "Boundary",
+                FL_LOG_LEVEL_INFO,
+                fieldsPointer,
+                "message",
+                nil,
+                8
+            ) > 0)
+        }
     }
 
     @Test("C literal and formatted entry points redact canaries")

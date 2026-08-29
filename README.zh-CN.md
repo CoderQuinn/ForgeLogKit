@@ -50,6 +50,7 @@ ForgeLogKit 分为三层：
 
 - 所有日志最终统一通过 **`os_log`** 输出
 - 动态格式字符串通过缓冲区安全处理
+- Swift、C 与 Objective-C 共享稳定的结构化字段序列化
 - Swift、C 与 Objective-C 消息在输出前共享同一轮内容脱敏
 - 新的统一日志接口默认将消息数据标记为 private
 - 不依赖应用层上下文或业务逻辑
@@ -76,9 +77,27 @@ log.log(.error, "cleanup failed", privacy: .public)
 
 // 也可以使用支持隐私参数的便捷重载。
 log.info("user-selected path: \(path)", privacy: .private)
+
+let fields = FLLogFields(
+  component: "packet-tunnel",
+  phase: "connect",
+  errorCode: "TCP_TIMEOUT",
+  correlationID: "flow-42"
+)!
+log.log(.error, "connection failed", fields: fields)
 ```
 
 为保持兼容，原有的 `info(_:)`、`debug(_:)`、`warn(_:)` 和 `error(_:)` 便捷方法继续沿用 0.2 版本公开消息数据的行为，但内容在输出前仍会脱敏。若脱敏后的整条消息也应通过 Unified Logging 的 private 路由，请使用 `log(_:_:privacy:)` 或显式指定隐私级别的重载。
+
+## 结构化字段
+
+Swift、C 与 Objective-C 的结构化事件使用相同的固定字段名与顺序：
+
+```text
+[network] [ERROR] [component=packet-tunnel][phase=connect][error_code=TCP_TIMEOUT][correlation_id=flow-42] connection failed
+```
+
+`component` 必填；`phase`、`error_code` 与 `correlation_id` 可选，未提供时不会输出。每个字段值必须由 1...64 个 ASCII 标识符字节组成，可使用字母、数字、`.`、`_`、`:` 或 `-`。包含空白、分隔符、空值或超长标识符的输入会 fail closed，不会产生含义不明确的字段。这些字段用于与产品模型无关的关联标识，不应承载原始配置或密钥；消息内容仍会在输出前经过默认脱敏。
 
 ## 默认密钥脱敏
 
@@ -101,6 +120,9 @@ FLLogOCInfoH(h, "connected");
 FLLogOCErrorH(h, "connection failed");
 FLLogOCLogH(h, FLLogOCLevelInfo, FLLogOCPrivacyPrivate,
             @"user-selected path");
+FLLogOCLogStructuredH(h, FLLogOCLevelError, FLLogOCPrivacyPrivate,
+                     @"packet-tunnel", @"connect", @"TCP_TIMEOUT",
+                     @"flow-42", @"connection failed");
 FLLogOCDestroy(h);
 ```
 
@@ -113,6 +135,14 @@ FLLogCHandle h = FLLogCCreate(NULL, "lwip");
 FLLogCLogfH(h, FL_LOG_LEVEL_DEBUG, "recv len=%u", len);
 FLLogCLogH(h, FL_LOG_LEVEL_INFO, FL_LOG_PRIVACY_PRIVATE,
            "user-selected path");
+FLLogCFields fields = {
+    .component = "packet-tunnel",
+    .phase = "connect",
+    .errorCode = "TCP_TIMEOUT",
+    .correlationID = "flow-42",
+};
+FLLogCLogStructuredH(h, FL_LOG_LEVEL_ERROR, FL_LOG_PRIVACY_PRIVATE,
+                     &fields, "connection failed");
 FLLogCDestroy(h);
 ```
 
