@@ -35,6 +35,17 @@ int FLLogCTestPrepareFormattedValues(
     FLLogCTestEvent *event
 );
 
+int FLLogCTestPrepareSensitiveFormattedValues(
+    const char *authorizationValue,
+    const char *credentialURL,
+    FLLogCTestEvent *event
+);
+
+int FLLogCTestPrepareOversizedFormattedValue(
+    const char *value,
+    FLLogCTestEvent *event
+);
+
 int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event);
 int FLLogCTestRejectsInvalidLiteralInputs(void);
 int FLLogCTestRejectsTinyFormattedBuffer(void);

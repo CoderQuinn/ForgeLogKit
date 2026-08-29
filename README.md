@@ -53,6 +53,7 @@ ForgeLogKit is split into three layers:
 - All logging ultimately goes through **`os_log`**
 - Swift, C, and Objective-C share one process-wide default subsystem
 - Dynamic format strings are handled safely via buffering
+- Swift, C, and Objective-C messages share one content-redaction pass before emission
 - New unified logging calls default to private message data
 - No dependency on app-level context or business logic
 - Suitable for Network Extension (VPN) environments
@@ -86,7 +87,29 @@ log.info("user-selected path: \(path)", privacy: .private)
 
 The original `info(_:)`, `debug(_:)`, `warn(_:)`, and `error(_:)`
 convenience methods keep their 0.2 public-message behavior for compatibility.
-Use `log(_:_:privacy:)` or an explicit privacy overload for sensitive data.
+Their content is still redacted before emission. Use `log(_:_:privacy:)` or an
+explicit privacy overload when the entire remaining message should also use
+Unified Logging's private routing.
+
+## Default secret redaction
+
+All Swift, C, and Objective-C entry points redact recognized secret-bearing
+content before applying the requested public/private routing:
+
+- case-insensitive named values such as `password`, `token`, `api_key`,
+  `private_key`, and `proxy_url`, including query-string and quoted JSON forms
+- complete `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, and
+  `X-API-Key` header values
+- URL user information such as `socks5://user:password@proxy.example`
+- complete PEM blocks whose label contains `PRIVATE KEY`
+
+Values become `<redacted>` and private-key blocks become
+`<redacted-private-key>`. The C redactor always NUL-terminates a supplied
+non-empty buffer and computes truncation from already-redacted output, so a
+short buffer cannot expose a partial matched value. Inputs that reach the 64
+KiB scan bound fail closed without emission. Privacy routing remains a separate
+defense: callers should still avoid logging unlabeled raw secrets and should
+use `.private` unless a message is intentionally public.
 
 ---
 
@@ -131,6 +154,7 @@ instances and explicit subsystem arguments are unchanged.
 **Latest tagged version:** 0.2.0
 
 - Existing 0.2 convenience APIs retain their public-message behavior
+- Recognized secret-bearing content is redacted before every entry point emits
 - Internal behavior may evolve
 - No API compatibility guarantee yet
 

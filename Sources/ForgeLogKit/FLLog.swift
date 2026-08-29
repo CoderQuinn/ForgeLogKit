@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import ForgeLogKitC
 import os.log
 
 public enum FLLogLevel: String, CaseIterable, Sendable {
@@ -67,6 +68,26 @@ internal struct FLLogBackend: @unchecked Sendable {
                 }
             }
         )
+    }
+}
+
+internal enum FLLogRedactor {
+    private static let failureMarker = "<redacted-invalid-message>"
+
+    static func redact(_ message: String) -> String {
+        message.withCString { input in
+            let requiredCapacity = FLLogCRedactMessage(input, nil, 0)
+            guard requiredCapacity > 0 else { return failureMarker }
+
+            var buffer = [CChar](repeating: 0, count: requiredCapacity)
+            let writtenCapacity = buffer.withUnsafeMutableBufferPointer {
+                FLLogCRedactMessage(input, $0.baseAddress, $0.count)
+            }
+            guard writtenCapacity == requiredCapacity else { return failureMarker }
+            return buffer.withUnsafeBufferPointer {
+                String(cString: $0.baseAddress!)
+            }
+        }
     }
 }
 
@@ -234,7 +255,7 @@ public struct FLLog: Sendable {
         _ message: String,
         privacy: FLLogPrivacy
     ) {
-        let formattedMessage = prefix(level) + message
+        let formattedMessage = prefix(level) + FLLogRedactor.redact(message)
         backend.emit(level.osLogType, privacy, formattedMessage)
     }
 }
