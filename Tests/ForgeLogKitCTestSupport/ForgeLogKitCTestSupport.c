@@ -133,6 +133,36 @@ int FLLogCTestPrepareFormattedValues(
     );
 }
 
+int FLLogCTestPrepareSensitiveFormattedValues(
+    const char *authorizationValue,
+    const char *credentialURL,
+    FLLogCTestEvent *event
+) {
+    return FLLogCTestPrepareFormatted(
+        "Redaction",
+        FL_LOG_LEVEL_INFO,
+        FL_LOG_PRIVACY_PUBLIC,
+        event,
+        "Authorization: Bearer %s\nendpoint=%s",
+        authorizationValue,
+        credentialURL
+    );
+}
+
+int FLLogCTestPrepareOversizedFormattedValue(
+    const char *value,
+    FLLogCTestEvent *event
+) {
+    return FLLogCTestPrepareFormatted(
+        "Oversized",
+        FL_LOG_LEVEL_ERROR,
+        FL_LOG_PRIVACY_PUBLIC,
+        event,
+        "%s",
+        value
+    );
+}
+
 int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event) {
     return FLLogCTestPrepareFormatted(
         "Null",

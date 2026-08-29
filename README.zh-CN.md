@@ -50,6 +50,7 @@ ForgeLogKit 分为三层：
 
 - 所有日志最终统一通过 **`os_log`** 输出
 - 动态格式字符串通过缓冲区安全处理
+- Swift、C 与 Objective-C 消息在输出前共享同一轮内容脱敏
 - 新的统一日志接口默认将消息数据标记为 private
 - 不依赖应用层上下文或业务逻辑
 - 适用于 Network Extension（VPN）环境
@@ -77,7 +78,18 @@ log.log(.error, "cleanup failed", privacy: .public)
 log.info("user-selected path: \(path)", privacy: .private)
 ```
 
-为保持兼容，原有的 `info(_:)`、`debug(_:)`、`warn(_:)` 和 `error(_:)` 便捷方法继续沿用 0.2 版本公开消息数据的行为。敏感数据请使用 `log(_:_:privacy:)` 或显式指定隐私级别的重载。
+为保持兼容，原有的 `info(_:)`、`debug(_:)`、`warn(_:)` 和 `error(_:)` 便捷方法继续沿用 0.2 版本公开消息数据的行为，但内容在输出前仍会脱敏。若脱敏后的整条消息也应通过 Unified Logging 的 private 路由，请使用 `log(_:_:privacy:)` 或显式指定隐私级别的重载。
+
+## 默认密钥脱敏
+
+所有 Swift、C 与 Objective-C 入口都会先脱敏已识别的敏感内容，再应用所请求的 public/private 路由：
+
+- 不区分大小写的命名值，例如 `password`、`token`、`api_key`、`private_key` 与 `proxy_url`，包括查询参数和带引号的 JSON 形式
+- 完整的 `Authorization`、`Proxy-Authorization`、`Cookie`、`Set-Cookie` 与 `X-API-Key` header 值
+- URL 中的用户凭据，例如 `socks5://user:password@proxy.example`
+- label 中包含 `PRIVATE KEY` 的完整 PEM 块
+
+普通值替换为 `<redacted>`，私钥块替换为 `<redacted-private-key>`。C redactor 对非空输出缓冲区始终写入 NUL 终止符，并基于已经脱敏的结果执行截断，因此短缓冲区不会暴露已匹配值的片段。输入达到 64 KiB 扫描上限时会 fail closed，不产生输出。隐私路由仍是独立防线：调用方不应记录无法识别、没有字段标签的原始密钥，并应默认使用 `.private`，除非消息明确需要公开。
 
 ---
 
@@ -111,6 +123,7 @@ FLLogCDestroy(h);
 **最新标签版本：** 0.2.0
 
 - 已有 0.2 便捷 API 保持公开消息数据行为
+- 所有入口在输出前都会脱敏已识别的敏感内容
 - 内部实现行为可能继续演进
 - 当前尚不承诺 API 兼容性
 

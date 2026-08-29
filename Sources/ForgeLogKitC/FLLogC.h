@@ -43,6 +43,21 @@ typedef enum {
 } FLLogPrivacy;
 
 /*
+ * Redact recognized secret-bearing fields before storage or emission.
+ *
+ * The return value is the required capacity including the trailing NUL byte.
+ * Passing NULL for buffer performs a size query. A non-NULL buffer is always
+ * NUL-terminated when capacity is greater than zero. Input and output must not
+ * overlap. A NULL message or one without a NUL byte before the 64 KiB scan
+ * bound returns zero.
+ */
+size_t FLLogCRedactMessage(
+    const char *message,
+    char *buffer,
+    size_t capacity
+);
+
+/*
  * Process-wide default subsystem shared by the Swift, C, and Objective-C APIs.
  *
  * Set accepts a non-NULL UTF-8 string and returns non-zero on success. Get
@@ -93,6 +108,7 @@ void FLLogCLogH(
  * Therefore the implementation does:
  *   vsnprintf → char buf[FL_LOG_MAX_BUF]
  *   os_log("%{public}s", buf)
+ * Formatted messages larger than FL_LOG_MAX_BUF fail closed without emission.
  */
 
 void FLLogCLogfH(

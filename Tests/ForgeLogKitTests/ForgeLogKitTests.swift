@@ -93,6 +93,29 @@ private func readCDefaultSubsystem() -> String {
     return ""
 }
 
+private func redactWithC(
+    _ message: String,
+    capacity requestedCapacity: Int? = nil
+) -> (requiredCapacity: Int, output: String) {
+    message.withCString { input in
+        let requiredCapacity = FLLogCRedactMessage(input, nil, 0)
+        let capacity = requestedCapacity ?? requiredCapacity
+        var buffer = [CChar](repeating: 0, count: capacity)
+        let returnedCapacity = buffer.withUnsafeMutableBufferPointer {
+            FLLogCRedactMessage(input, $0.baseAddress, $0.count)
+        }
+        let output = buffer.isEmpty ? "" : buffer.withUnsafeBufferPointer {
+            String(cString: $0.baseAddress!)
+        }
+        #expect(returnedCapacity == requiredCapacity)
+        return (requiredCapacity, output)
+    }
+}
+
+private func containsCanary(_ text: String, canaries: [String]) -> Bool {
+    canaries.contains { text.contains($0) }
+}
+
 /// Tests for FLLog Swift API to verify category and level prefixes
 @Suite("FLLog Swift API Tests")
 struct FLLogTests {
@@ -284,6 +307,141 @@ struct FLLogTests {
         #expect(probe.evaluationCount == 0)
         #expect(recorder.events.isEmpty)
     }
+
+    @Test("Every Swift entry point redacts secret-bearing content before routing")
+    func testSwiftEntryPointRedaction() {
+        let canaries = [
+            ["velvet", "-password"].joined(),
+            ["amber", "-token"].joined(),
+            ["bearer", "-credential"].joined(),
+            ["proxy", "-user"].joined(),
+            ["proxy", "-password"].joined(),
+            ["key", "-material"].joined(),
+            ["pem", "-payload"].joined(),
+        ]
+        let privateKeyBegin = ["-----BEGIN ", "PRIVATE KEY-----"].joined()
+        let privateKeyEnd = ["-----END ", "PRIVATE KEY-----"].joined()
+        let message = """
+        password="\(canaries[0])" token=\(canaries[1])
+        Authorization: Bearer \(canaries[2])
+        endpoint=socks5://\(canaries[3]):\(canaries[4])@proxy.example:1080/path
+        private_key=\(canaries[5])
+        \(privateKeyBegin)
+        \(canaries[6])
+        \(privateKeyEnd)
+        """
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "Redaction", backend: recorder.backend())
+
+        logger.info(message as String)
+        logger.log(.error, message, privacy: .private)
+
+        let events = recorder.events
+        let leakDetected = events.contains {
+            containsCanary($0.message, canaries: canaries)
+        }
+        let expectedMarkersPresent = events.allSatisfy {
+            $0.message.contains("password=\"<redacted>\"") &&
+                $0.message.contains("token=<redacted>") &&
+                $0.message.contains("Authorization: <redacted>") &&
+                $0.message.contains("socks5://<redacted>@proxy.example") &&
+                $0.message.contains("private_key=<redacted>") &&
+                $0.message.contains("<redacted-private-key>")
+        }
+
+        #expect(events.map(\.privacy) == ["public", "private"])
+        #expect(leakDetected == false)
+        #expect(expectedMarkersPresent)
+    }
+
+    @Test("Redactor covers aliases, JSON values, and sensitive headers")
+    func testRedactionPatterns() {
+        let tokenFields = [
+            "password", "passwd", "pwd", "token", "access_token",
+            "refresh_token", "api_key", "apikey", "secret", "private_key",
+            "proxy_url",
+        ]
+        let lineFields = [
+            "authorization", "proxy-authorization", "cookie", "set-cookie",
+            "x-api-key",
+        ]
+        let canaries = (0 ..< tokenFields.count + lineFields.count).map {
+            ["canary", "-\($0)", "-value"].joined()
+        }
+        let tokenLines = zip(tokenFields, canaries).enumerated().map { index, pair in
+            index == 0
+                ? "\"\(pair.0.uppercased())\": \"\(pair.1)\""
+                : "\(pair.0)=\(pair.1)"
+        }
+        let lineLines = zip(lineFields, canaries.dropFirst(tokenFields.count)).map {
+            "\($0.0): \($0.1) trailing metadata"
+        }
+        let result = redactWithC((tokenLines + lineLines).joined(separator: "\n"))
+        let leakDetected = containsCanary(result.output, canaries: canaries)
+        let markerCount = result.output.components(separatedBy: "<redacted>").count - 1
+
+        #expect(result.requiredCapacity == result.output.utf8.count + 1)
+        #expect(leakDetected == false)
+        #expect(markerCount == canaries.count)
+    }
+
+    @Test("Redactor preserves benign lookalikes and public URLs")
+    func testRedactionFalsePositiveBoundaries() {
+        let benign = """
+        tokenCount=7 passwordless=true secret handling enabled
+        endpoint=https://proxy.example/path@segment?apikeyCount=2
+        cookieJar=memory authorizationState=ready
+        """
+
+        #expect(redactWithC(benign).output == benign)
+    }
+
+    @Test("Redactor fails closed for bounded buffers and private-key tails")
+    func testRedactionBoundaryBehavior() {
+        let canaries = [
+            ["tiny", "-secret"].joined(),
+            ["url", "-user"].joined(),
+            ["url", "-password"].joined(),
+            ["unterminated", "-pem"].joined(),
+        ]
+        let privateKeyBegin = ["-----BEGIN OPENSSH ", "PRIVATE KEY-----"].joined()
+        let tiny = redactWithC("token=\(canaries[0])", capacity: 8)
+        let credentialURL = redactWithC(
+            "http://\(canaries[1]):\(canaries[2])@proxy.example/path"
+        )
+        let privateKey = redactWithC("""
+        \(privateKeyBegin)
+        \(canaries[3])
+        """)
+        let empty = redactWithC("")
+        let oversized = String(
+            repeating: "X",
+            count: 65_536
+        )
+        var oversizedBuffer = [CChar](repeating: 1, count: 1)
+        let oversizedResult = oversized.withCString { input in
+            oversizedBuffer.withUnsafeMutableBufferPointer {
+                FLLogCRedactMessage(input, $0.baseAddress, $0.count)
+            }
+        }
+        var nullBuffer = [CChar](repeating: 1, count: 1)
+        let nullResult = nullBuffer.withUnsafeMutableBufferPointer {
+            FLLogCRedactMessage(nil, $0.baseAddress, $0.count)
+        }
+
+        #expect(containsCanary(tiny.output, canaries: canaries) == false)
+        #expect(tiny.requiredCapacity > tiny.output.utf8.count)
+        #expect(containsCanary(credentialURL.output, canaries: canaries) == false)
+        #expect(credentialURL.output == "http://<redacted>@proxy.example/path")
+        #expect(containsCanary(privateKey.output, canaries: canaries) == false)
+        #expect(privateKey.output == "<redacted-private-key>")
+        #expect(empty.requiredCapacity == 1)
+        #expect(empty.output.isEmpty)
+        #expect(oversizedResult == 0)
+        #expect(oversizedBuffer[0] == 0)
+        #expect(nullResult == 0)
+        #expect(nullBuffer[0] == 0)
+    }
     
     // MARK: - Initialization Tests
     
@@ -461,6 +619,49 @@ struct FLLogCTests {
         #expect(FLLogCTestEventLogType(&event) == OSLogType.error.rawValue)
         #expect(FLLogCTestEventIsPublic(&event) == 0)
     }
+
+    @Test("C literal and formatted entry points redact canaries")
+    func testCEntryPointRedaction() {
+        let canaries = [
+            ["c", "-password"].joined(),
+            ["c", "-authorization"].joined(),
+            ["c", "-url-user"].joined(),
+            ["c", "-url-password"].joined(),
+        ]
+        var literalEvent = FLLogCTestEvent()
+        var formattedEvent = FLLogCTestEvent()
+
+        let literalResult = FLLogCTestPrepareLiteral(
+            "Redaction",
+            FL_LOG_LEVEL_ERROR,
+            FL_LOG_PRIVACY_PUBLIC,
+            "password=\(canaries[0])",
+            &literalEvent
+        )
+        let credentialURL =
+            "https://\(canaries[2]):\(canaries[3])@proxy.example:8443"
+        let formattedResult = FLLogCTestPrepareSensitiveFormattedValues(
+            canaries[1],
+            credentialURL,
+            &formattedEvent
+        )
+        let outputs = [literalEvent, formattedEvent].map { event in
+            var copy = event
+            return FLLogCTestEventMessage(&copy).map(String.init(cString:)) ?? ""
+        }
+        let leakDetected = outputs.contains {
+            containsCanary($0, canaries: canaries)
+        }
+        let expectedMarkersPresent =
+            outputs[0].contains("password=<redacted>") &&
+            outputs[1].contains("Authorization: <redacted>") &&
+            outputs[1].contains("https://<redacted>@proxy.example")
+
+        #expect(literalResult == 1)
+        #expect(formattedResult == 1)
+        #expect(leakDetected == false)
+        #expect(expectedMarkersPresent)
+    }
     
     @Test("Null variadic format is rejected without an event")
     func testLogfWithNullFormat() {
@@ -547,8 +748,16 @@ struct FLLogCTests {
 
     @Test("C format helpers reject invalid inputs and insufficient prefix space")
     func testFormattingBoundaries() {
+        var oversizedEvent = FLLogCTestEvent()
+        let oversizedValue = String(repeating: "X", count: Int(FL_LOG_MAX_BUF))
+
         #expect(FLLogCTestRejectsInvalidLiteralInputs() == 1)
         #expect(FLLogCTestRejectsTinyFormattedBuffer() == 1)
+        #expect(FLLogCTestPrepareOversizedFormattedValue(
+            oversizedValue,
+            &oversizedEvent
+        ) == 0)
+        #expect(FLLogCTestEventMessage(&oversizedEvent).map(String.init(cString:)) == "")
         #expect(FLLogCTestEventMessage(nil) == nil)
         #expect(FLLogCTestEventLogType(nil) == 0)
         #expect(FLLogCTestEventIsPublic(nil) == 0)

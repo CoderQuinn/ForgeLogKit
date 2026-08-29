@@ -88,13 +88,16 @@ FL_INTERNAL int FLLogCInternalFormatMessage(
 ) {
     if (!buf || size == 0 || !msg) return 0;
 
+    char redacted[FL_LOG_MAX_BUF];
+    if (FLLogCRedactMessage(msg, redacted, sizeof(redacted)) == 0) return 0;
+
     int n = snprintf(
         buf,
         size,
         "[%s] [%s] %s",
         category ? category : "unknown",
         _level_string(level),
-        msg
+        redacted
     );
 
     buf[size - 1] = '\0';
@@ -111,28 +114,34 @@ FL_INTERNAL int FLLogCInternalVFormatMessage(
 ) {
     if (!buf || size == 0 || !fmt) return 0;
 
-    int n = snprintf(
-        buf,
-        size,
-        "[%s] [%s] ",
-        category ? category : "unknown",
-        _level_string(level)
-    );
-
-    if (n <= 0 || n >= (int)size) return 0;
+    char message[FL_LOG_MAX_BUF];
 
     va_list ap_copy;
     va_copy(ap_copy, ap);
     int message_length = vsnprintf(
-        buf + n,
-        size - (unsigned long)n,
+        message,
+        sizeof(message),
         fmt,
         ap_copy
     );
     va_end(ap_copy);
 
+    if (message_length < 0 || message_length >= (int)sizeof(message)) return 0;
+
+    char redacted[FL_LOG_MAX_BUF];
+    if (FLLogCRedactMessage(message, redacted, sizeof(redacted)) == 0) return 0;
+
+    int n = snprintf(
+        buf,
+        size,
+        "[%s] [%s] %s",
+        category ? category : "unknown",
+        _level_string(level),
+        redacted
+    );
+
     buf[size - 1] = '\0';
-    return message_length >= 0;
+    return n >= 0 && n < (int)size;
 }
 
 /* ================= lifecycle ================= */
