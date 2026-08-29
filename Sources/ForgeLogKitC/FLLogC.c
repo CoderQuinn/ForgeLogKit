@@ -8,11 +8,14 @@
 #include "FLLogC.h"
 #include <os/log.h>
 #include <pthread.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
 
 #define FL_INTERNAL __attribute__((visibility("hidden")))
+#define FL_LOG_FIELD_MAX_BYTES 64
+#define FL_LOG_FIELDS_MAX_BUF 384
 
 /* ================= internal ================= */
 
@@ -66,6 +69,182 @@ static inline os_log_t _log(FLLogCHandle h) {
 
 static inline int _is_public(FLLogPrivacy privacy) {
     return privacy == FL_LOG_PRIVACY_PUBLIC;
+}
+
+static int FLIsFieldByte(unsigned char byte) {
+    return
+        (byte >= 'A' && byte <= 'Z') ||
+        (byte >= 'a' && byte <= 'z') ||
+        (byte >= '0' && byte <= '9') ||
+        byte == '.' || byte == '_' || byte == ':' || byte == '-';
+}
+
+static int FLIsValidField(const char *value) {
+    if (!value) return 0;
+
+    size_t length = strnlen(value, FL_LOG_FIELD_MAX_BYTES + 1);
+    if (length == 0 || length > FL_LOG_FIELD_MAX_BYTES) return 0;
+    for (size_t index = 0; index < length; index++) {
+        if (!FLIsFieldByte((unsigned char)value[index])) return 0;
+    }
+    return 1;
+}
+
+static int FLAppendField(
+    char *buffer,
+    size_t capacity,
+    size_t *length,
+    const char *name,
+    const char *value
+) {
+    if (!buffer || !length || !name || !value || *length >= capacity) return 0;
+
+    int written = snprintf(
+        buffer + *length,
+        capacity - *length,
+        "[%s=%s]",
+        name,
+        value
+    );
+    if (written < 0 || (size_t)written >= capacity - *length) return 0;
+    *length += (size_t)written;
+    return 1;
+}
+
+static int FLFormatFields(
+    char *buffer,
+    size_t capacity,
+    const FLLogCFields *fields
+) {
+    if (!buffer || capacity == 0 || !fields ||
+        !FLIsValidField(fields->component)) return 0;
+    if ((fields->phase && !FLIsValidField(fields->phase)) ||
+        (fields->errorCode && !FLIsValidField(fields->errorCode)) ||
+        (fields->correlationID && !FLIsValidField(fields->correlationID))) {
+        return 0;
+    }
+
+    size_t length = 0;
+    if (!FLAppendField(
+        buffer,
+        capacity,
+        &length,
+        "component",
+        fields->component
+    )) return 0;
+    if (fields->phase && !FLAppendField(
+        buffer,
+        capacity,
+        &length,
+        "phase",
+        fields->phase
+    )) return 0;
+    if (fields->errorCode && !FLAppendField(
+        buffer,
+        capacity,
+        &length,
+        "error_code",
+        fields->errorCode
+    )) return 0;
+    if (fields->correlationID && !FLAppendField(
+        buffer,
+        capacity,
+        &length,
+        "correlation_id",
+        fields->correlationID
+    )) return 0;
+
+    if (length + 1 >= capacity) return 0;
+    buffer[length] = ' ';
+    buffer[length + 1] = '\0';
+    return 1;
+}
+
+static size_t FLFormatStructuredMessage(
+    char *buffer,
+    size_t capacity,
+    const char *category,
+    FLLogLevel level,
+    const FLLogCFields *fields,
+    const char *message
+) {
+    if (!message || !fields) {
+        if (buffer && capacity > 0) buffer[0] = '\0';
+        return 0;
+    }
+
+    char formattedFields[FL_LOG_FIELDS_MAX_BUF] = "";
+    if (!FLFormatFields(
+        formattedFields,
+        sizeof(formattedFields),
+        fields
+    )) {
+        if (buffer && capacity > 0) buffer[0] = '\0';
+        return 0;
+    }
+
+    size_t redactedCapacity = FLLogCRedactMessage(message, NULL, 0);
+    if (redactedCapacity == 0) {
+        if (buffer && capacity > 0) buffer[0] = '\0';
+        return 0;
+    }
+
+    int prefixLength = snprintf(
+        NULL,
+        0,
+        "[%s] [%s] %s",
+        category ? category : "unknown",
+        _level_string(level),
+        formattedFields
+    );
+    if (prefixLength < 0 ||
+        redactedCapacity > SIZE_MAX - (size_t)prefixLength) {
+        if (buffer && capacity > 0) buffer[0] = '\0';
+        return 0;
+    }
+    size_t requiredCapacity = (size_t)prefixLength + redactedCapacity;
+    if (!buffer || capacity == 0) return requiredCapacity;
+
+    char stackRedacted[FL_LOG_MAX_BUF];
+    char *redacted = stackRedacted;
+    if (redactedCapacity > sizeof(stackRedacted)) {
+        redacted = malloc(redactedCapacity);
+        if (!redacted) {
+            buffer[0] = '\0';
+            return 0;
+        }
+    }
+
+    size_t returnedCapacity = FLLogCRedactMessage(
+        message,
+        redacted,
+        redactedCapacity > sizeof(stackRedacted)
+            ? redactedCapacity
+            : sizeof(stackRedacted)
+    );
+    if (returnedCapacity != redactedCapacity) {
+        if (redacted != stackRedacted) free(redacted);
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    int written = snprintf(
+        buffer,
+        capacity,
+        "[%s] [%s] %s%s",
+        category ? category : "unknown",
+        _level_string(level),
+        formattedFields,
+        redacted
+    );
+    if (written < 0 || (size_t)written + 1 != requiredCapacity) {
+        if (redacted != stackRedacted) free(redacted);
+        buffer[0] = '\0';
+        return 0;
+    }
+    if (redacted != stackRedacted) free(redacted);
+    buffer[capacity - 1] = '\0';
+    return requiredCapacity;
 }
 
 /* These hidden functions are shared by production emission and the C test
@@ -163,6 +342,24 @@ int FLLogCSetDefaultSubsystem(const char *subsystem) {
     return 1;
 }
 
+size_t FLLogCFormatStructuredMessage(
+    const char *category,
+    FLLogLevel level,
+    const FLLogCFields *fields,
+    const char *message,
+    char *buffer,
+    size_t capacity
+) {
+    return FLFormatStructuredMessage(
+        buffer,
+        capacity,
+        category,
+        level,
+        fields,
+        message
+    );
+}
+
 size_t FLLogCGetDefaultSubsystem(char *buffer, size_t capacity) {
     if (pthread_mutex_lock(&FLDefaultSubsystemLock) != 0) return 0;
 
@@ -207,6 +404,29 @@ void FLLogCDestroy(FLLogCHandle h) {
 
 /* ================= core emit ================= */
 
+static void FLEmitPrepared(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const char *message
+) {
+    if (FLLogCInternalIsPublic(privacy)) {
+        os_log_with_type(
+            _log(h),
+            (os_log_type_t)FLLogCInternalTypeForLevel(level),
+            "%{public}s",
+            message
+        );
+    } else {
+        os_log_with_type(
+            _log(h),
+            (os_log_type_t)FLLogCInternalTypeForLevel(level),
+            "%{private}s",
+            message
+        );
+    }
+}
+
 static void _emit(
     FLLogCHandle h,
     FLLogLevel level,
@@ -222,21 +442,27 @@ static void _emit(
         msg
     )) return;
 
-    if (FLLogCInternalIsPublic(privacy)) {
-        os_log_with_type(
-            _log(h),
-            (os_log_type_t)FLLogCInternalTypeForLevel(level),
-            "%{public}s",
-            buf
-        );
-    } else {
-        os_log_with_type(
-            _log(h),
-            (os_log_type_t)FLLogCInternalTypeForLevel(level),
-            "%{private}s",
-            buf
-        );
-    }
+    FLEmitPrepared(h, level, privacy, buf);
+}
+
+static void _emit_structured(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const FLLogCFields *fields,
+    const char *msg
+) {
+    char buf[FL_LOG_MAX_BUF];
+    if (FLLogCFormatStructuredMessage(
+        (h && h->category) ? h->category : "unknown",
+        level,
+        fields,
+        msg,
+        buf,
+        sizeof(buf)
+    ) == 0) return;
+
+    FLEmitPrepared(h, level, privacy, buf);
 }
 
 /* ================= basic APIs ================= */
@@ -272,6 +498,16 @@ void FLLogCLogH(
     const char *msg
 ) {
     _emit(h, level, privacy, msg);
+}
+
+void FLLogCLogStructuredH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const FLLogCFields *fields,
+    const char *msg
+) {
+    _emit_structured(h, level, privacy, fields, msg);
 }
 
 /* ================= printf APIs ================= */

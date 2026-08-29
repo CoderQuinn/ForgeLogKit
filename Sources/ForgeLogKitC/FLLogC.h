@@ -43,6 +43,21 @@ typedef enum {
 } FLLogPrivacy;
 
 /*
+ * Stable structured fields shared by the Swift, C, and Objective-C APIs.
+ *
+ * component is required. The remaining fields are optional. Every supplied
+ * value must contain 1...64 ASCII identifier bytes from A-Z, a-z, 0-9, '.',
+ * '_', ':', or '-'. This deliberately excludes whitespace and delimiters so
+ * the serialized representation cannot be made ambiguous by caller input.
+ */
+typedef struct {
+    const char *component;
+    const char *phase;
+    const char *errorCode;
+    const char *correlationID;
+} FLLogCFields;
+
+/*
  * Redact recognized secret-bearing fields before storage or emission.
  *
  * The return value is the required capacity including the trailing NUL byte.
@@ -52,6 +67,27 @@ typedef enum {
  * bound returns zero.
  */
 size_t FLLogCRedactMessage(
+    const char *message,
+    char *buffer,
+    size_t capacity
+);
+
+/*
+ * Format one structured event using this stable field order:
+ *
+ * [category] [LEVEL] [component=...][phase=...][error_code=...]
+ * [correlation_id=...] message
+ *
+ * Optional fields that are NULL are omitted. The message is redacted before
+ * formatting. The return value is the required capacity including the
+ * trailing NUL byte. Passing NULL for buffer performs a size query. A
+ * non-NULL buffer is always NUL-terminated when capacity is greater than zero.
+ * Invalid fields or messages fail closed and return zero.
+ */
+size_t FLLogCFormatStructuredMessage(
+    const char *category,
+    FLLogLevel level,
+    const FLLogCFields *fields,
     const char *message,
     char *buffer,
     size_t capacity
@@ -98,6 +134,15 @@ void FLLogCLogH(
     FLLogCHandle h,
     FLLogLevel level,
     FLLogPrivacy privacy,
+    const char *msg
+);
+
+/* Emit a validated structured event. Invalid inputs fail closed. */
+void FLLogCLogStructuredH(
+    FLLogCHandle h,
+    FLLogLevel level,
+    FLLogPrivacy privacy,
+    const FLLogCFields *fields,
     const char *msg
 );
 

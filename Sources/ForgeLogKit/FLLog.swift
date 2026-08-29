@@ -33,11 +33,91 @@ public enum FLLogLevel: String, CaseIterable, Sendable {
         case .fault: .fault
         }
     }
+
+    internal var cLevel: ForgeLogKitC.FLLogLevel {
+        switch self {
+        case .debug: FL_LOG_LEVEL_DEBUG
+        case .info: FL_LOG_LEVEL_INFO
+        case .warning: FL_LOG_LEVEL_WARN
+        case .error: FL_LOG_LEVEL_ERROR
+        case .fault: FL_LOG_LEVEL_FAULT
+        }
+    }
 }
 
 public enum FLLogPrivacy: Sendable {
     case `private`
     case `public`
+}
+
+/// Validated, product-independent fields for correlating one structured event.
+///
+/// `component` is required. The remaining fields are optional. Each supplied
+/// value must contain 1...64 ASCII identifier bytes from `A-Z`, `a-z`, `0-9`,
+/// `.`, `_`, `:`, or `-`. The restricted alphabet keeps the shared Swift, C,
+/// and Objective-C serialization unambiguous.
+public struct FLLogFields: Hashable, Sendable {
+    public let component: String
+    public let phase: String?
+    public let errorCode: String?
+    public let correlationID: String?
+
+    public init?(
+        component: String,
+        phase: String? = nil,
+        errorCode: String? = nil,
+        correlationID: String? = nil
+    ) {
+        guard Self.isValid(component),
+              phase.map(Self.isValid) ?? true,
+              errorCode.map(Self.isValid) ?? true,
+              correlationID.map(Self.isValid) ?? true else {
+            return nil
+        }
+
+        self.component = component
+        self.phase = phase
+        self.errorCode = errorCode
+        self.correlationID = correlationID
+    }
+
+    private static func isValid(_ value: String) -> Bool {
+        guard (1 ... 64).contains(value.utf8.count) else { return false }
+        return value.utf8.allSatisfy { byte in
+            (byte >= 65 && byte <= 90) ||
+                (byte >= 97 && byte <= 122) ||
+                (byte >= 48 && byte <= 57) ||
+                byte == 46 || byte == 95 || byte == 58 || byte == 45
+        }
+    }
+
+    internal func withCFields<Result>(
+        _ body: (UnsafePointer<FLLogCFields>) -> Result
+    ) -> Result {
+        component.withCString { componentPointer in
+            withOptionalCString(phase) { phasePointer in
+                withOptionalCString(errorCode) { errorCodePointer in
+                    withOptionalCString(correlationID) { correlationIDPointer in
+                        var fields = FLLogCFields(
+                            component: componentPointer,
+                            phase: phasePointer,
+                            errorCode: errorCodePointer,
+                            correlationID: correlationIDPointer
+                        )
+                        return withUnsafePointer(to: &fields, body)
+                    }
+                }
+            }
+        }
+    }
+
+    private func withOptionalCString<Result>(
+        _ value: String?,
+        _ body: (UnsafePointer<CChar>?) -> Result
+    ) -> Result {
+        guard let value else { return body(nil) }
+        return value.withCString(body)
+    }
 }
 
 /// Internal indirection that keeps Unified Logging observable in unit tests
@@ -135,6 +215,19 @@ public struct FLLog: Sendable {
     ) {
         guard isEnabled(for: level) else { return }
         emit(level, message(), privacy: privacy)
+    }
+
+    /// Logs one structured event using the shared Swift/C/Objective-C field
+    /// contract. The message remains lazy and defaults to private routing.
+    @inline(__always)
+    public func log(
+        _ level: FLLogLevel,
+        _ message: @autoclosure () -> String,
+        fields: FLLogFields,
+        privacy: FLLogPrivacy = .private
+    ) {
+        guard isEnabled(for: level) else { return }
+        emit(level, message(), fields: fields, privacy: privacy)
     }
 
     // MARK: - Prefix builder
@@ -256,6 +349,51 @@ public struct FLLog: Sendable {
         privacy: FLLogPrivacy
     ) {
         let formattedMessage = prefix(level) + FLLogRedactor.redact(message)
+        backend.emit(level.osLogType, privacy, formattedMessage)
+    }
+
+    @inline(__always)
+    private func emit(
+        _ level: FLLogLevel,
+        _ message: String,
+        fields: FLLogFields,
+        privacy: FLLogPrivacy
+    ) {
+        guard let formattedMessage = fields.withCFields({ fieldsPointer in
+            category.withCString { categoryPointer in
+                message.withCString { messagePointer -> String? in
+                    let requiredCapacity = FLLogCFormatStructuredMessage(
+                        categoryPointer,
+                        level.cLevel,
+                        fieldsPointer,
+                        messagePointer,
+                        nil,
+                        0
+                    )
+                    guard requiredCapacity > 0 else { return nil }
+
+                    var buffer = [CChar](
+                        repeating: 0,
+                        count: requiredCapacity
+                    )
+                    let returnedCapacity = buffer.withUnsafeMutableBufferPointer {
+                        FLLogCFormatStructuredMessage(
+                            categoryPointer,
+                            level.cLevel,
+                            fieldsPointer,
+                            messagePointer,
+                            $0.baseAddress,
+                            $0.count
+                        )
+                    }
+                    guard returnedCapacity == requiredCapacity else { return nil }
+                    return buffer.withUnsafeBufferPointer {
+                        String(cString: $0.baseAddress!)
+                    }
+                }
+            }
+        }) else { return }
+
         backend.emit(level.osLogType, privacy, formattedMessage)
     }
 }
