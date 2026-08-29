@@ -51,6 +51,7 @@ ForgeLogKit is split into three layers:
 ## Design Notes
 
 - All logging ultimately goes through **`os_log`**
+- Swift, C, and Objective-C share one process-wide default subsystem
 - Dynamic format strings are handled safely via buffering
 - New unified logging calls default to private message data
 - No dependency on app-level context or business logic
@@ -62,6 +63,10 @@ ForgeLogKit is split into three layers:
 ## Swift Usage
 
 ```swift
+// Configure once during process startup. C and Objective-C handles created
+// with a nil subsystem use the same value.
+FLConfig.defaultSubsystem = "com.example.product.network-extension"
+
 let log = FLLog(category: "network")
 let path = "/Users/example/Documents"
 
@@ -88,6 +93,9 @@ Use `log(_:_:privacy:)` or an explicit privacy overload for sensitive data.
 ## Objective-C Usage
 
 ```objc
+// Use this when Objective-C owns process startup configuration.
+FLLogOCSetDefaultSubsystem(@"com.example.product.network-extension");
+
 FLLogOCHandle h = FLLogOCCreate(nil, @"network");
 FLLogOCInfoH(h, "connected");
 FLLogOCErrorH(h, "connection failed");
@@ -101,12 +109,20 @@ FLLogOCDestroy(h);
 ## C Usage
 
 ```c
+/* Use this when C owns process startup configuration. */
+FLLogCSetDefaultSubsystem("com.example.product.network-extension");
+
 FLLogCHandle h = FLLogCCreate(NULL, "lwip");
 FLLogCLogfH(h, FL_LOG_LEVEL_DEBUG, "recv len=%u", len);
 FLLogCLogH(h, FL_LOG_LEVEL_INFO, FL_LOG_PRIVACY_PRIVATE,
            "user-selected path");
 FLLogCDestroy(h);
 ```
+
+The three configuration APIs update the same process-wide value; call the one
+owned by your process entry point. The configured default is used only when a
+new logger or handle is created without an explicit subsystem. Existing
+instances and explicit subsystem arguments are unchanged.
 
 ---
 

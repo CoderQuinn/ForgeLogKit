@@ -8,6 +8,29 @@
 #import "FLLogOC.h"
 #import "FLLogC.h"
 
+BOOL FLLogOCSetDefaultSubsystem(NSString *subsystem) {
+    return FLLogCSetDefaultSubsystem(subsystem.UTF8String) != 0;
+}
+
+NSString *FLLogOCDefaultSubsystem(void) {
+    size_t capacity = FLLogCGetDefaultSubsystem(NULL, 0);
+    if (capacity == 0) return @"";
+
+    NSMutableData *buffer = [NSMutableData dataWithLength:capacity];
+    while (YES) {
+        size_t requiredCapacity = FLLogCGetDefaultSubsystem(
+            buffer.mutableBytes,
+            buffer.length
+        );
+        if (requiredCapacity == 0) return @"";
+        if (requiredCapacity <= buffer.length) {
+            NSString *subsystem = [NSString stringWithUTF8String:buffer.bytes];
+            return subsystem ?: @"";
+        }
+        buffer.length = requiredCapacity;
+    }
+}
+
 FLLogOCHandle FLLogOCCreate(
     NSString *subsystem,
     NSString *category

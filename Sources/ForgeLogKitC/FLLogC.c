@@ -7,6 +7,7 @@
 
 #include "FLLogC.h"
 #include <os/log.h>
+#include <pthread.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
@@ -20,8 +21,21 @@ struct FLLogCHandle {
     const char *category;   /* owned copy */
 };
 
-static const char *FLDefaultSubsystem(void) {
-    return "com.forgelogkit.default";
+static const char FLBuiltInDefaultSubsystem[] = "com.forgelogkit.default";
+static pthread_mutex_t FLDefaultSubsystemLock = PTHREAD_MUTEX_INITIALIZER;
+static char *FLConfiguredDefaultSubsystem;
+
+static const char *FLDefaultSubsystemLocked(void) {
+    return FLConfiguredDefaultSubsystem
+        ? FLConfiguredDefaultSubsystem
+        : FLBuiltInDefaultSubsystem;
+}
+
+static char *FLCopyDefaultSubsystem(void) {
+    if (pthread_mutex_lock(&FLDefaultSubsystemLock) != 0) return NULL;
+    char *copy = strdup(FLDefaultSubsystemLocked());
+    pthread_mutex_unlock(&FLDefaultSubsystemLock);
+    return copy;
 }
 
 static const char *_level_string(FLLogLevel level) {
@@ -123,14 +137,50 @@ FL_INTERNAL int FLLogCInternalVFormatMessage(
 
 /* ================= lifecycle ================= */
 
+int FLLogCSetDefaultSubsystem(const char *subsystem) {
+    if (!subsystem) return 0;
+
+    char *copy = strdup(subsystem);
+    if (!copy) return 0;
+    if (pthread_mutex_lock(&FLDefaultSubsystemLock) != 0) {
+        free(copy);
+        return 0;
+    }
+
+    char *previous = FLConfiguredDefaultSubsystem;
+    FLConfiguredDefaultSubsystem = copy;
+    pthread_mutex_unlock(&FLDefaultSubsystemLock);
+    free(previous);
+    return 1;
+}
+
+size_t FLLogCGetDefaultSubsystem(char *buffer, size_t capacity) {
+    if (pthread_mutex_lock(&FLDefaultSubsystemLock) != 0) return 0;
+
+    const char *subsystem = FLDefaultSubsystemLocked();
+    int writtenLength = buffer && capacity > 0
+        ? snprintf(buffer, capacity, "%s", subsystem)
+        : snprintf(NULL, 0, "%s", subsystem);
+
+    pthread_mutex_unlock(&FLDefaultSubsystemLock);
+    return writtenLength < 0 ? 0 : (size_t)writtenLength + 1;
+}
+
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
-    const char *sub = subsystem ? subsystem : FLDefaultSubsystem();
+    char *defaultSubsystem = subsystem ? NULL : FLCopyDefaultSubsystem();
+    if (!subsystem && !defaultSubsystem) return NULL;
+
+    const char *sub = subsystem ? subsystem : defaultSubsystem;
     const char *cat = category  ? category  : "Default";
 
     FLLogCHandle h = (FLLogCHandle)calloc(1, sizeof(*h));
-    if (!h) return NULL;
+    if (!h) {
+        free(defaultSubsystem);
+        return NULL;
+    }
 
     h->log = os_log_create(sub, cat);
+    free(defaultSubsystem);
     h->category = strdup(cat); /* own it */
     if (!h->category) {
         free(h);

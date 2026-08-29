@@ -2,6 +2,7 @@
 import Foundation
 import ForgeLogKitC
 import ForgeLogKitCTestSupport
+import ForgeLogKitOC
 import Testing
 import os.log
 
@@ -69,6 +70,27 @@ private final class UnexpectedValueRecorder: @unchecked Sendable {
         defer { lock.unlock() }
         return recordedValues
     }
+}
+
+private func readCDefaultSubsystem() -> String {
+    var capacity = FLLogCGetDefaultSubsystem(nil, 0)
+    #expect(capacity > 0)
+
+    while capacity > 0 {
+        var buffer = [CChar](repeating: 0, count: capacity)
+        let requiredCapacity = buffer.withUnsafeMutableBufferPointer {
+            FLLogCGetDefaultSubsystem($0.baseAddress, $0.count)
+        }
+        #expect(requiredCapacity > 0)
+        if requiredCapacity <= buffer.count {
+            return buffer.withUnsafeBufferPointer {
+                String(cString: $0.baseAddress!)
+            }
+        }
+        capacity = requiredCapacity
+    }
+
+    return ""
 }
 
 /// Tests for FLLog Swift API to verify category and level prefixes
@@ -621,6 +643,8 @@ struct FLConfigTests {
     @Test("Default subsystem is set correctly")
     func testDefaultSubsystem() throws {
         #expect(FLConfig.defaultSubsystem == "com.forgelogkit.default")
+        #expect(readCDefaultSubsystem() == "com.forgelogkit.default")
+        #expect(FLLogOCDefaultSubsystem() == "com.forgelogkit.default")
     }
     
     @Test("Default subsystem can be changed")
@@ -636,6 +660,48 @@ struct FLConfigTests {
         // Restore original value
         FLConfig.defaultSubsystem = originalSubsystem
         #expect(FLConfig.defaultSubsystem == originalSubsystem)
+    }
+
+    @Test("Swift default subsystem is shared with C and Objective-C")
+    func testSwiftDefaultSubsystemIsSharedAcrossLanguages() {
+        let originalSubsystem = FLConfig.defaultSubsystem
+        defer { FLConfig.defaultSubsystem = originalSubsystem }
+
+        let expectedSubsystem = "com.forgelogkit.tests.swift"
+        FLConfig.defaultSubsystem = expectedSubsystem
+
+        #expect(FLLog(category: "SwiftContract").subsystem == expectedSubsystem)
+        #expect(readCDefaultSubsystem() == expectedSubsystem)
+        #expect(FLLogOCDefaultSubsystem() == expectedSubsystem)
+    }
+
+    @Test("C default subsystem is shared with Swift and Objective-C")
+    func testCDefaultSubsystemIsSharedAcrossLanguages() {
+        let originalSubsystem = FLConfig.defaultSubsystem
+        defer { FLConfig.defaultSubsystem = originalSubsystem }
+
+        let expectedSubsystem = "com.forgelogkit.tests.c"
+        #expect(FLLogCSetDefaultSubsystem(expectedSubsystem) != 0)
+
+        #expect(FLConfig.defaultSubsystem == expectedSubsystem)
+        #expect(FLLogOCDefaultSubsystem() == expectedSubsystem)
+        let handle = FLLogCCreate(nil, "CContract")
+        #expect(handle != nil)
+        FLLogCDestroy(handle)
+    }
+
+    @Test("Objective-C default subsystem is shared with Swift and C")
+    func testObjectiveCDefaultSubsystemIsSharedAcrossLanguages() {
+        let originalSubsystem = FLConfig.defaultSubsystem
+        defer { FLConfig.defaultSubsystem = originalSubsystem }
+
+        let expectedSubsystem = "com.forgelogkit.tests.objc"
+        #expect(FLLogOCSetDefaultSubsystem(expectedSubsystem))
+
+        #expect(FLConfig.defaultSubsystem == expectedSubsystem)
+        #expect(readCDefaultSubsystem() == expectedSubsystem)
+        let handle = FLLogOCCreate(nil, "ObjectiveCContract")
+        FLLogOCDestroy(handle)
     }
 
     @Test("Concurrent FLConfig reads and writes remain atomic")

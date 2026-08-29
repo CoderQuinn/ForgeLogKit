@@ -11,6 +11,11 @@ NS_ASSUME_NONNULL_BEGIN
 
 typedef void *FLLogOCHandle;
 
+/// Process-wide default subsystem shared with the Swift and C APIs.
+/// Changes affect only log handles created after the update.
+FOUNDATION_EXPORT BOOL FLLogOCSetDefaultSubsystem(NSString *subsystem);
+FOUNDATION_EXPORT NSString *FLLogOCDefaultSubsystem(void);
+
 /// Create ObjC log instance
 /// subsystem nil → default
 FOUNDATION_EXPORT FLLogOCHandle FLLogOCCreate(
