@@ -179,6 +179,15 @@ FLLogCLogStructuredH(h, FL_LOG_LEVEL_ERROR, FL_LOG_PRIVACY_PRIVATE,
 FLLogCDestroy(h);
 ```
 
+C and Objective-C handles have one exclusive lifecycle owner. Logging and
+`isEnabled` calls that borrowed the handle before registry removal may finish;
+later racing calls fail closed. `FLLogCDestroy` / `FLLogOCDestroy` wait for
+active borrows before reclaiming the handle. The owner must stop scheduling
+new calls before destroy starts, invoke destroy exactly once, and never use the
+handle value after destroy returns. This ownership rule avoids ambiguous
+stale-handle reuse if an allocator later assigns the same address to a
+different handle.
+
 The three configuration APIs update the same process-wide value; call the one
 owned by your process entry point. The configured default is used only when a
 new logger or handle is created without an explicit subsystem. Existing

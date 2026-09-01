@@ -628,6 +628,21 @@ struct FLLogCTests {
         FLLogCDestroy(handle)
         // Successfully destroyed, no crash
     }
+
+    @Test("Destroy waits for borrowed calls and rejects closing entry points")
+    func testDestroyWaitsForBorrowedCalls() {
+        #expect(FLLogCTestDestroyWaitsForBorrowedCalls() == 1)
+    }
+
+    @Test("All C entry points survive repeated concurrent teardown")
+    func testConcurrentHandleTeardownStress() {
+        #expect(FLLogCTestConcurrentHandleTeardown(128, 4) == 1)
+    }
+
+    @Test("Immediate stale calls and repeated destroy fail closed defensively")
+    func testImmediateStaleHandleRejection() {
+        #expect(FLLogCTestDefensivelyRejectsImmediateStaleHandle() == 1)
+    }
     
     @Test("Create handle with null subsystem uses default")
     func testHandleWithNullSubsystem() throws {

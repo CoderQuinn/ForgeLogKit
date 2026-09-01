@@ -146,6 +146,13 @@ FLLogCLogStructuredH(h, FL_LOG_LEVEL_ERROR, FL_LOG_PRIVACY_PRIVATE,
 FLLogCDestroy(h);
 ```
 
+C 与 Objective-C handle 必须由一个生命周期 owner 独占管理。在 registry 移除前已
+borrow handle 的日志与 `isEnabled` 调用可以完成，之后到达的竞态调用会 fail closed；
+`FLLogCDestroy` / `FLLogOCDestroy` 会在回收 handle 前等待进行中的 borrow 结束。
+owner 必须在开始销毁前停止调度新调用、只调用一次 destroy，并且在 destroy 返回后不再
+使用该 handle 值。这个所有权约束也避免 allocator 未来把同一地址分配给另一个 handle
+时产生含义不明的旧值复用。
+
 ---
 
 ## 版本策略
