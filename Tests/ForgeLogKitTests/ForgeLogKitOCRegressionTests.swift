@@ -1,5 +1,5 @@
-import Foundation
 import ForgeLogKitOC
+import Foundation
 import Testing
 
 private final class ObjectiveCHandleTeardownStress: @unchecked Sendable {
@@ -59,9 +59,13 @@ private final class ObjectiveCHandleTeardownStress: @unchecked Sendable {
     }
 
     private func exercise(path: Int) {
-        let info = FLLogOCLevel(rawValue: 1)!
-        let error = FLLogOCLevel(rawValue: 3)!
-        let privatePrivacy = FLLogOCPrivacy(rawValue: 0)!
+        guard
+            let info = FLLogOCLevel(rawValue: 1),
+            let error = FLLogOCLevel(rawValue: 3),
+            let privatePrivacy = FLLogOCPrivacy(rawValue: 0)
+        else {
+            preconditionFailure("Objective-C logging enums must preserve their declared raw values")
+        }
 
         switch path {
         case 0:
@@ -108,10 +112,14 @@ struct ForgeLogKitOCRegressionTests {
     @Test("Objective-C unified API handles defaults, privacy, nil, and enabled checks")
     func testUnifiedDefaultsAndBoundaries() {
         let handle = FLLogOCCreate(nil, nil)
-        let info = FLLogOCLevel(rawValue: 1)!
-        let error = FLLogOCLevel(rawValue: 3)!
-        let privatePrivacy = FLLogOCPrivacy(rawValue: 0)!
-        let publicPrivacy = FLLogOCPrivacy(rawValue: 1)!
+        guard
+            let info = FLLogOCLevel(rawValue: 1),
+            let error = FLLogOCLevel(rawValue: 3),
+            let privatePrivacy = FLLogOCPrivacy(rawValue: 0),
+            let publicPrivacy = FLLogOCPrivacy(rawValue: 1)
+        else {
+            preconditionFailure("Objective-C logging enums must preserve their declared raw values")
+        }
 
         _ = FLLogOCIsEnabledH(handle, info)
         FLLogOCLogH(handle, info, publicPrivacy, "public message")
@@ -152,7 +160,7 @@ struct ForgeLogKitOCRegressionTests {
             attributes: .concurrent
         )
 
-        for _ in 0 ..< 64 {
+        for _ in 0..<64 {
             let state = ObjectiveCHandleTeardownStress(
                 handle: FLLogOCCreate(
                     "com.forgelogkit.tests",
@@ -160,7 +168,7 @@ struct ForgeLogKitOCRegressionTests {
                 )
             )
             let group = DispatchGroup()
-            for index in 0 ..< workerCount {
+            for index in 0..<workerCount {
                 group.enter()
                 queue.async {
                     state.runWorker(index: index)
