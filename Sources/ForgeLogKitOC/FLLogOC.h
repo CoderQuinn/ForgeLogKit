@@ -23,6 +23,9 @@ FOUNDATION_EXPORT FLLogOCHandle FLLogOCCreate(
     NSString *_Nullable category
 );
 
+/// Destroy one exclusively owned handle. Calls that already borrowed it may
+/// finish concurrently; later racing calls fail closed. The owner must prevent
+/// new calls once destruction starts and never reuse the handle after return.
 FOUNDATION_EXPORT void FLLogOCDestroy(FLLogOCHandle _Nullable h);
 
 FOUNDATION_EXPORT void FLLogOCInfoH (FLLogOCHandle h, const char *msg);
