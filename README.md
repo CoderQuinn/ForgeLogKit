@@ -102,6 +102,21 @@ Unified Logging's private routing.
 
 ## Structured fields
 
+For dynamic fields, use the additive lazy overload:
+
+```swift
+log.log(.debug, "connection status", lazyFields: {
+  FLLogFields(component: "runtime", phase: "connect")
+})
+```
+
+When the level is disabled, neither this closure nor the message is evaluated.
+Otherwise fields are evaluated once, followed by the message once; returning nil
+from the field builder drops the event without evaluating the message. Privacy
+defaults to private, and output uses the same formatter/redactor as `fields:`.
+Existing eager fields and public convenience overloads are unchanged. Identifier
+validation is not anonymization: do not put domains, IP addresses, or secrets in fields.
+
 Structured events use the same fixed field names and order from Swift, C, and
 Objective-C:
 
@@ -127,6 +142,9 @@ content before applying the requested public/private routing:
 - complete `Authorization`, `Proxy-Authorization`, `Cookie`, `Set-Cookie`, and
   `X-API-Key` header values
 - URL user information such as `socks5://user:password@proxy.example`
+- `PrivateKey`, `PresharedKey`, and `HeaderProtectionKey` labels, including
+  snake_case and hyphen-separated spellings, case-insensitively; complete name
+  boundaries preserve benign lookalikes such as `PrivateKeyCount`
 - complete PEM blocks whose label contains `PRIVATE KEY`
 
 Values become `<redacted>` and private-key blocks become
@@ -136,6 +154,21 @@ short buffer cannot expose a partial matched value. Inputs that reach the 64
 KiB scan bound fail closed without emission. Privacy routing remains a separate
 defense: callers should still avoid logging unlabeled raw secrets and should
 use `.private` unless a message is intentionally public.
+This is label-based defense in depth, not a configuration parser or a guarantee
+of recognizing arbitrary secrets (including encoded/escaped field names).
+Never pass raw keys to the logger. Unclosed quoted recognized values redact
+through the end of input; quoted JSON and configuration assignments share the
+same C redactor, including Swift lazy structured messages and Objective-C.
+
+Local alias regressions: `swift test --filter testKeyAliasRedaction` checks
+JSON/configuration values, escaped/unclosed quotes, case/name boundaries,
+every short-buffer capacity, and Swift lazy/C structured output agreement.
+`bash Scripts/test-objc-redaction.sh` compiles the actual ObjC adapter and C
+implementation, captures only the OS submission boundary, and asserts 8,100
+outputs and privacy routes across aliases, casing, multiline JSON,
+escaped/unclosed quotes, benign lookalikes, and unquoted line boundaries. Each
+sample also checks the C redactor's exact text and every truncated-buffer
+capacity. It does not verify OS log persistence.
 
 ---
 

@@ -91,6 +91,19 @@ log.log(.error, "connection failed", fields: fields)
 
 ## 结构化字段
 
+动态字段使用新增的惰性重载：
+
+```swift
+log.log(.debug, "connection status", lazyFields: {
+  FLLogFields(component: "runtime", phase: "connect")
+})
+```
+
+级别关闭时，字段闭包和消息均不求值；开启时先构造一次字段，再求值一次消息。
+字段返回 nil 时丢弃事件，消息不求值。默认 private，复用既有格式化与脱敏路径；
+原 `fields:` 和 public 便捷 API 保持兼容。字段合法字符校验不等于匿名化，
+不得将域名、IP 或密钥放进字段。
+
 Swift、C 与 Objective-C 的结构化事件使用相同的固定字段名与顺序：
 
 ```text
@@ -100,6 +113,19 @@ Swift、C 与 Objective-C 的结构化事件使用相同的固定字段名与顺
 `component` 必填；`phase`、`error_code` 与 `correlation_id` 可选，未提供时不会输出。每个字段值必须由 1...64 个 ASCII 标识符字节组成，可使用字母、数字、`.`、`_`、`:` 或 `-`。包含空白、分隔符、空值或超长标识符的输入会 fail closed，不会产生含义不明确的字段。这些字段用于与产品模型无关的关联标识，不应承载原始配置或密钥；消息内容仍会在输出前经过默认脱敏。
 
 ## 默认密钥脱敏
+
+支持 `PrivateKey`、`PresharedKey`、`HeaderProtectionKey` 及其 snake_case、连字符别名，
+不区分大小写；完整名字边界保留 `PrivateKeyCount` 等无害近似名称。
+这是基于标签的纵深防御，不是配置解析器，也不保证识别任意秘密（包括编码或转义后的字段名）。
+禁止向日志传入原始密钥。已识别标签的未闭合引号值会脱敏至输入末尾；JSON、配置赋值、
+Swift 惰性结构化消息与 Objective-C 复用同一 C 脱敏器。
+
+本地 `swift test --filter testKeyAliasRedaction` 验证 JSON/配置值、转义/未闭合引号、
+大小写及名字边界、每种短缓冲容量，以及 Swift 惰性/C 结构化输出一致性。
+`bash Scripts/test-objc-redaction.sh` 编译真实 ObjC 适配器和 C 实现，仅截获系统提交边界，
+断言 8,100 次输出及隐私路由，覆盖别名、大小写、多行 JSON、转义/未闭合引号、
+无害近似名称和未引号语法的换行边界；每个输入还直接核对 C 脱敏器的精确文本及
+所有截断缓冲区容量。不证明系统日志持久化。
 
 所有 Swift、C 与 Objective-C 入口都会先脱敏已识别的敏感内容，再应用所请求的 public/private 路由：
 

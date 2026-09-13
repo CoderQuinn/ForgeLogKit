@@ -35,6 +35,14 @@ static const FLSensitiveField FLSensitiveFields[] = {
     FL_FIELD("authorization", FL_REDACT_LINE_VALUE),
     FL_FIELD("set-cookie", FL_REDACT_LINE_VALUE),
     FL_FIELD("private_key", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("private-key", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("privatekey", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("preshared_key", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("preshared-key", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("presharedkey", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("header_protection_key", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("header-protection-key", FL_REDACT_TOKEN_VALUE),
+    FL_FIELD("headerprotectionkey", FL_REDACT_TOKEN_VALUE),
     FL_FIELD("proxy_url", FL_REDACT_TOKEN_VALUE),
     FL_FIELD("x-api-key", FL_REDACT_LINE_VALUE),
     FL_FIELD("password", FL_REDACT_TOKEN_VALUE),
@@ -123,16 +131,27 @@ static int FLMatchSensitiveField(
 
         size_t cursor = index + field->length;
         if (cursor < inputLength && FLIsNameCharacter(input[cursor])) continue;
+        int isQuotedJSONKey = index > 0 && input[index - 1] == '"' &&
+            cursor < inputLength && input[cursor] == '"';
         if (cursor < inputLength &&
             (input[cursor] == '\'' || input[cursor] == '"')) cursor++;
-        while (cursor < inputLength && isspace((unsigned char)input[cursor]) &&
-               input[cursor] != '\r' && input[cursor] != '\n') cursor++;
+        int crossedKeyLine = 0;
+        while (cursor < inputLength && isspace((unsigned char)input[cursor])) {
+            if (input[cursor] == '\r' || input[cursor] == '\n') {
+                if (!isQuotedJSONKey) break;
+                crossedKeyLine = 1;
+            }
+            cursor++;
+        }
         if (cursor >= inputLength ||
             (input[cursor] != '=' && input[cursor] != ':')) continue;
+        char delimiter = input[cursor];
+        if (crossedKeyLine && delimiter != ':') continue;
 
         cursor++;
         while (cursor < inputLength && isspace((unsigned char)input[cursor]) &&
-               input[cursor] != '\r' && input[cursor] != '\n') cursor++;
+               ((isQuotedJSONKey && delimiter == ':') ||
+                (input[cursor] != '\r' && input[cursor] != '\n'))) cursor++;
 
         char quote = 0;
         if (cursor < inputLength &&

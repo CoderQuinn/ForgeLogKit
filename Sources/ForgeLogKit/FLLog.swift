@@ -230,6 +230,20 @@ public struct FLLog: Sendable {
         emit(level, message(), fields: fields, privacy: privacy)
     }
 
+    /// Builds dynamic fields only after the level gate, then evaluates the
+    /// message once. Returning nil drops the event without evaluating its message.
+    /// Field validation checks syntax, not anonymity: never put secrets in fields.
+    @inline(__always)
+    public func log(
+        _ level: FLLogLevel,
+        _ message: @autoclosure () -> String,
+        lazyFields: () -> FLLogFields?,
+        privacy: FLLogPrivacy = .private
+    ) {
+        guard isEnabled(for: level), let fields = lazyFields() else { return }
+        emit(level, message(), fields: fields, privacy: privacy)
+    }
+
     // MARK: - Prefix builder
 
     @inline(__always)
