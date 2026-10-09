@@ -49,6 +49,12 @@ int FLLogCTestPrepareOversizedFormattedValue(
 int FLLogCTestPrepareNullFormat(FLLogCTestEvent *event);
 int FLLogCTestRejectsInvalidLiteralInputs(void);
 int FLLogCTestRejectsTinyFormattedBuffer(void);
+int FLLogCTestDestroyWaitsForBorrowedCalls(void);
+int FLLogCTestConcurrentHandleTeardown(
+    unsigned int iterations,
+    unsigned int workerCount
+);
+int FLLogCTestDefensivelyRejectsImmediateStaleHandle(void);
 const char *FLLogCTestEventMessage(const FLLogCTestEvent *event);
 unsigned char FLLogCTestEventLogType(const FLLogCTestEvent *event);
 int FLLogCTestEventIsPublic(const FLLogCTestEvent *event);

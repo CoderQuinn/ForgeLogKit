@@ -22,11 +22,44 @@
 struct FLLogCHandle {
     os_log_t log;
     const char *category;   /* owned copy */
+    size_t activeCalls;
+    int isDestroying;
+    struct FLLogCHandle *next;
 };
+
+typedef struct {
+    FLLogCHandle handle;
+    os_log_t log;
+    const char *category;
+} FLLogCHandleBorrow;
 
 static const char FLBuiltInDefaultSubsystem[] = "com.forgelogkit.default";
 static pthread_mutex_t FLDefaultSubsystemLock = PTHREAD_MUTEX_INITIALIZER;
 static char *FLConfiguredDefaultSubsystem;
+static pthread_mutex_t FLHandleRegistryLock = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t FLHandleRegistryCondition = PTHREAD_COND_INITIALIZER;
+static FLLogCHandle FLRegisteredHandles;
+
+/* A synchronization failure would make the active-call count unrecoverable.
+ * Fail fast instead of allowing teardown to hang or reclaim live memory. */
+static void FLLockHandleRegistry(void) {
+    if (pthread_mutex_lock(&FLHandleRegistryLock) != 0) abort();
+}
+
+static void FLUnlockHandleRegistry(void) {
+    if (pthread_mutex_unlock(&FLHandleRegistryLock) != 0) abort();
+}
+
+static void FLSignalHandleRegistry(void) {
+    if (pthread_cond_broadcast(&FLHandleRegistryCondition) != 0) abort();
+}
+
+static void FLWaitForHandleRegistryChange(void) {
+    if (pthread_cond_wait(
+        &FLHandleRegistryCondition,
+        &FLHandleRegistryLock
+    ) != 0) abort();
+}
 
 static const char *FLDefaultSubsystemLocked(void) {
     return FLConfiguredDefaultSubsystem
@@ -63,8 +96,50 @@ static os_log_type_t _type_for_level(FLLogLevel level) {
     }
 }
 
-static inline os_log_t _log(FLLogCHandle h) {
-    return (h && h->log) ? h->log : OS_LOG_DEFAULT;
+static int FLBorrowHandle(
+    FLLogCHandle h,
+    FLLogCHandleBorrow *borrow
+) {
+    if (!borrow) return 0;
+
+    borrow->handle = NULL;
+    borrow->log = OS_LOG_DEFAULT;
+    borrow->category = "unknown";
+    if (!h) return 1;
+
+    FLLockHandleRegistry();
+
+    /* Compare the opaque value against live entries before dereferencing it. */
+    FLLogCHandle current = FLRegisteredHandles;
+    while (current && current != h) current = current->next;
+
+    int didBorrow = 0;
+    if (current && !current->isDestroying &&
+        current->activeCalls < SIZE_MAX) {
+        current->activeCalls += 1;
+        borrow->handle = current;
+        borrow->log = current->log ? current->log : OS_LOG_DEFAULT;
+        borrow->category = current->category ? current->category : "unknown";
+        didBorrow = 1;
+    }
+
+    FLUnlockHandleRegistry();
+    return didBorrow;
+}
+
+static void FLReturnHandle(FLLogCHandleBorrow *borrow) {
+    if (!borrow || !borrow->handle) return;
+
+    FLLogCHandle h = borrow->handle;
+    FLLockHandleRegistry();
+
+    if (h->activeCalls > 0) h->activeCalls -= 1;
+    if (h->isDestroying && h->activeCalls == 0) {
+        FLSignalHandleRegistry();
+    }
+
+    FLUnlockHandleRegistry();
+    borrow->handle = NULL;
 }
 
 static inline int _is_public(FLLogPrivacy privacy) {
@@ -258,6 +333,20 @@ FL_INTERNAL int FLLogCInternalIsPublic(FLLogPrivacy privacy) {
     return _is_public(privacy);
 }
 
+FL_INTERNAL int FLLogCInternalWithHandleBorrow(
+    FLLogCHandle h,
+    void (*body)(void *),
+    void *context
+) {
+    if (!body) return 0;
+
+    FLLogCHandleBorrow borrow;
+    if (!FLBorrowHandle(h, &borrow)) return 0;
+    body(context);
+    FLReturnHandle(&borrow);
+    return 1;
+}
+
 FL_INTERNAL int FLLogCInternalFormatMessage(
     char *buf,
     unsigned long size,
@@ -393,11 +482,34 @@ FLLogCHandle FLLogCCreate(const char *subsystem, const char *category) {
         return NULL;
     }
 
+    FLLockHandleRegistry();
+    h->next = FLRegisteredHandles;
+    FLRegisteredHandles = h;
+    FLUnlockHandleRegistry();
+
     return h;
 }
 
 void FLLogCDestroy(FLLogCHandle h) {
     if (!h) return;
+
+    FLLockHandleRegistry();
+
+    FLLogCHandle *slot = &FLRegisteredHandles;
+    while (*slot && *slot != h) slot = &(*slot)->next;
+    if (!*slot) {
+        FLUnlockHandleRegistry();
+        return;
+    }
+
+    *slot = h->next;
+    h->next = NULL;
+    h->isDestroying = 1;
+    while (h->activeCalls > 0) {
+        FLWaitForHandleRegistryChange();
+    }
+
+    FLUnlockHandleRegistry();
     free((void *)h->category);
     free(h);
 }
@@ -405,21 +517,21 @@ void FLLogCDestroy(FLLogCHandle h) {
 /* ================= core emit ================= */
 
 static void FLEmitPrepared(
-    FLLogCHandle h,
+    os_log_t log,
     FLLogLevel level,
     FLLogPrivacy privacy,
     const char *message
 ) {
     if (FLLogCInternalIsPublic(privacy)) {
         os_log_with_type(
-            _log(h),
+            log,
             (os_log_type_t)FLLogCInternalTypeForLevel(level),
             "%{public}s",
             message
         );
     } else {
         os_log_with_type(
-            _log(h),
+            log,
             (os_log_type_t)FLLogCInternalTypeForLevel(level),
             "%{private}s",
             message
@@ -433,16 +545,21 @@ static void _emit(
     FLLogPrivacy privacy,
     const char *msg
 ) {
+    FLLogCHandleBorrow borrow;
+    if (!FLBorrowHandle(h, &borrow)) return;
+
     char buf[FL_LOG_MAX_BUF];
-    if (!FLLogCInternalFormatMessage(
+    if (FLLogCInternalFormatMessage(
         buf,
         sizeof(buf),
-        (h && h->category) ? h->category : "unknown",
+        borrow.category,
         level,
         msg
-    )) return;
+    )) {
+        FLEmitPrepared(borrow.log, level, privacy, buf);
+    }
 
-    FLEmitPrepared(h, level, privacy, buf);
+    FLReturnHandle(&borrow);
 }
 
 static void _emit_structured(
@@ -452,17 +569,22 @@ static void _emit_structured(
     const FLLogCFields *fields,
     const char *msg
 ) {
+    FLLogCHandleBorrow borrow;
+    if (!FLBorrowHandle(h, &borrow)) return;
+
     char buf[FL_LOG_MAX_BUF];
     if (FLLogCFormatStructuredMessage(
-        (h && h->category) ? h->category : "unknown",
+        borrow.category,
         level,
         fields,
         msg,
         buf,
         sizeof(buf)
-    ) == 0) return;
+    ) != 0) {
+        FLEmitPrepared(borrow.log, level, privacy, buf);
+    }
 
-    FLEmitPrepared(h, level, privacy, buf);
+    FLReturnHandle(&borrow);
 }
 
 /* ================= basic APIs ================= */
@@ -488,7 +610,11 @@ void FLLogCFaultH(FLLogCHandle h, const char *msg) {
 }
 
 int FLLogCIsEnabledH(FLLogCHandle h, FLLogLevel level) {
-    return os_log_type_enabled(_log(h), _type_for_level(level));
+    FLLogCHandleBorrow borrow;
+    if (!FLBorrowHandle(h, &borrow)) return 0;
+    int isEnabled = os_log_type_enabled(borrow.log, _type_for_level(level));
+    FLReturnHandle(&borrow);
+    return isEnabled;
 }
 
 void FLLogCLogH(
@@ -534,31 +660,22 @@ void FLLogCVLogfPrivacyH(
     const char *fmt,
     va_list ap
 ) {
+    FLLogCHandleBorrow borrow;
+    if (!FLBorrowHandle(h, &borrow)) return;
+
     char buf[FL_LOG_MAX_BUF];
-    if (!FLLogCInternalVFormatMessage(
+    if (FLLogCInternalVFormatMessage(
         buf,
         sizeof(buf),
-        (h && h->category) ? h->category : "unknown",
+        borrow.category,
         level,
         fmt,
         ap
-    )) return;
-
-    if (FLLogCInternalIsPublic(privacy)) {
-        os_log_with_type(
-            _log(h),
-            (os_log_type_t)FLLogCInternalTypeForLevel(level),
-            "%{public}s",
-            buf
-        );
-    } else {
-        os_log_with_type(
-            _log(h),
-            (os_log_type_t)FLLogCInternalTypeForLevel(level),
-            "%{private}s",
-            buf
-        );
+    )) {
+        FLEmitPrepared(borrow.log, level, privacy, buf);
     }
+
+    FLReturnHandle(&borrow);
 }
 
 void FLLogCLogfH(

@@ -114,7 +114,14 @@ size_t FLLogCGetDefaultSubsystem(char *buffer, size_t capacity);
 FLLogCHandle FLLogCCreate(const char *subsystem, const char *category);
 
 /*
- * Destroy handle (os_log_t does not need releasing; only free the wrapper)
+ * Destroy one exclusively owned handle.
+ *
+ * Calls that borrow the handle before registry removal finish concurrently;
+ * destroy waits for those calls before reclaiming the wrapper. Racing calls
+ * that reach the registry after removal fail closed. The owner must prevent
+ * new calls from starting once destruction begins, call destroy exactly once,
+ * and never reuse the handle value after this function returns. Passing NULL
+ * remains a no-op.
  */
 void FLLogCDestroy(FLLogCHandle h);
 

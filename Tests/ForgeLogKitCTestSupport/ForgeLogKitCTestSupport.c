@@ -1,4 +1,7 @@
 #include "ForgeLogKitCTestSupport.h"
+#include <pthread.h>
+#include <sched.h>
+#include <stdlib.h>
 
 /* Hidden implementation seams from FLLogC.c. They are deliberately absent
  * from the product header and are consumed only by this test-support target. */
@@ -19,6 +22,30 @@ int FLLogCInternalVFormatMessage(
     const char *fmt,
     va_list ap
 );
+int FLLogCInternalWithHandleBorrow(
+    FLLogCHandle h,
+    void (*body)(void *),
+    void *context
+);
+
+static void FLLogCTestLock(pthread_mutex_t *lock) {
+    if (pthread_mutex_lock(lock) != 0) abort();
+}
+
+static void FLLogCTestUnlock(pthread_mutex_t *lock) {
+    if (pthread_mutex_unlock(lock) != 0) abort();
+}
+
+static void FLLogCTestBroadcast(pthread_cond_t *condition) {
+    if (pthread_cond_broadcast(condition) != 0) abort();
+}
+
+static void FLLogCTestWait(
+    pthread_cond_t *condition,
+    pthread_mutex_t *lock
+) {
+    if (pthread_cond_wait(condition, lock) != 0) abort();
+}
 
 static void FLLogCTestResetEvent(FLLogCTestEvent *event) {
     if (!event) return;
@@ -217,6 +244,385 @@ static int FLLogCTestFormatTinyBuffer(const char *fmt, ...) {
 
 int FLLogCTestRejectsTinyFormattedBuffer(void) {
     return FLLogCTestFormatTinyBuffer("message") == 0;
+}
+
+typedef struct {
+    FLLogCHandle handle;
+    pthread_mutex_t lock;
+    pthread_cond_t condition;
+    int borrowEntered;
+    int exerciseClosing;
+    int exercisedClosing;
+    int releaseBorrow;
+    int borrowResult;
+    int closingIsEnabled;
+    int destroyReturned;
+} FLLogCTestBorrowContext;
+
+static void FLLogCTestExerciseAllHandlePaths(FLLogCHandle handle) {
+    FLLogCFields fields = {
+        .component = "lifecycle",
+        .phase = "teardown",
+        .errorCode = 0,
+        .correlationID = "stress-1",
+    };
+
+    FLLogCInfoH(handle, "lifecycle literal");
+    FLLogCLogH(
+        handle,
+        FL_LOG_LEVEL_ERROR,
+        FL_LOG_PRIVACY_PRIVATE,
+        "lifecycle explicit"
+    );
+    (void)FLLogCIsEnabledH(handle, FL_LOG_LEVEL_INFO);
+    FLLogCLogStructuredH(
+        handle,
+        FL_LOG_LEVEL_WARN,
+        FL_LOG_PRIVACY_PRIVATE,
+        &fields,
+        "lifecycle structured"
+    );
+    FLLogCLogfPrivacyH(
+        handle,
+        FL_LOG_LEVEL_DEBUG,
+        FL_LOG_PRIVACY_PUBLIC,
+        "lifecycle printf %d",
+        42
+    );
+}
+
+static void FLLogCTestExerciseAndHoldBorrow(void *rawContext) {
+    FLLogCTestBorrowContext *context = rawContext;
+    FLLogCTestExerciseAllHandlePaths(context->handle);
+
+    FLLogCTestLock(&context->lock);
+    context->borrowEntered = 1;
+    FLLogCTestBroadcast(&context->condition);
+    while (!context->exerciseClosing) {
+        FLLogCTestWait(&context->condition, &context->lock);
+    }
+    FLLogCTestUnlock(&context->lock);
+
+    context->closingIsEnabled = FLLogCIsEnabledH(
+        context->handle,
+        FL_LOG_LEVEL_INFO
+    );
+    FLLogCTestExerciseAllHandlePaths(context->handle);
+
+    FLLogCTestLock(&context->lock);
+    context->exercisedClosing = 1;
+    FLLogCTestBroadcast(&context->condition);
+    while (!context->releaseBorrow) {
+        FLLogCTestWait(&context->condition, &context->lock);
+    }
+    FLLogCTestUnlock(&context->lock);
+}
+
+static void *FLLogCTestBorrowThread(void *rawContext) {
+    FLLogCTestBorrowContext *context = rawContext;
+    context->borrowResult = FLLogCInternalWithHandleBorrow(
+        context->handle,
+        FLLogCTestExerciseAndHoldBorrow,
+        context
+    );
+    return 0;
+}
+
+static void *FLLogCTestDestroyThread(void *rawContext) {
+    FLLogCTestBorrowContext *context = rawContext;
+    FLLogCDestroy(context->handle);
+
+    FLLogCTestLock(&context->lock);
+    context->destroyReturned = 1;
+    FLLogCTestBroadcast(&context->condition);
+    FLLogCTestUnlock(&context->lock);
+    return 0;
+}
+
+static void FLLogCTestNoopBorrow(void *context) {
+    (void)context;
+}
+
+int FLLogCTestDestroyWaitsForBorrowedCalls(void) {
+    FLLogCTestBorrowContext context = {0};
+    context.handle = FLLogCCreate(
+        "com.forgelogkit.tests",
+        "BorrowedTeardown"
+    );
+    if (!context.handle) return 0;
+    if (pthread_mutex_init(&context.lock, 0) != 0) {
+        FLLogCDestroy(context.handle);
+        return 0;
+    }
+    if (pthread_cond_init(&context.condition, 0) != 0) {
+        pthread_mutex_destroy(&context.lock);
+        FLLogCDestroy(context.handle);
+        return 0;
+    }
+
+    pthread_t borrower;
+    if (pthread_create(&borrower, 0, FLLogCTestBorrowThread, &context) != 0) {
+        pthread_cond_destroy(&context.condition);
+        pthread_mutex_destroy(&context.lock);
+        FLLogCDestroy(context.handle);
+        return 0;
+    }
+
+    FLLogCTestLock(&context.lock);
+    while (!context.borrowEntered) {
+        FLLogCTestWait(&context.condition, &context.lock);
+    }
+    FLLogCTestUnlock(&context.lock);
+
+    pthread_t destroyer;
+    if (pthread_create(&destroyer, 0, FLLogCTestDestroyThread, &context) != 0) {
+        FLLogCTestLock(&context.lock);
+        context.exerciseClosing = 1;
+        context.releaseBorrow = 1;
+        FLLogCTestBroadcast(&context.condition);
+        FLLogCTestUnlock(&context.lock);
+        pthread_join(borrower, 0);
+        FLLogCDestroy(context.handle);
+        pthread_cond_destroy(&context.condition);
+        pthread_mutex_destroy(&context.lock);
+        return 0;
+    }
+
+    int didCloseRegistry = 0;
+    for (unsigned int attempt = 0; attempt < 100000; attempt++) {
+        if (!FLLogCInternalWithHandleBorrow(
+            context.handle,
+            FLLogCTestNoopBorrow,
+            0
+        )) {
+            didCloseRegistry = 1;
+            break;
+        }
+        sched_yield();
+    }
+
+    FLLogCTestLock(&context.lock);
+    context.exerciseClosing = 1;
+    FLLogCTestBroadcast(&context.condition);
+    while (!context.exercisedClosing) {
+        FLLogCTestWait(&context.condition, &context.lock);
+    }
+    int returnedBeforeRelease = context.destroyReturned;
+    context.releaseBorrow = 1;
+    FLLogCTestBroadcast(&context.condition);
+    FLLogCTestUnlock(&context.lock);
+
+    pthread_join(borrower, 0);
+    pthread_join(destroyer, 0);
+
+    int result =
+        didCloseRegistry &&
+        context.borrowResult == 1 &&
+        context.closingIsEnabled == 0 &&
+        returnedBeforeRelease == 0 &&
+        context.destroyReturned == 1;
+    pthread_cond_destroy(&context.condition);
+    pthread_mutex_destroy(&context.lock);
+    return result;
+}
+
+enum {
+    FLLogCTestLiteralPath = 1 << 0,
+    FLLogCTestEnabledPath = 1 << 1,
+    FLLogCTestStructuredPath = 1 << 2,
+    FLLogCTestPrintfPath = 1 << 3,
+    FLLogCTestAllPaths = (1 << 4) - 1,
+};
+
+typedef struct {
+    FLLogCHandle handle;
+    pthread_mutex_t lock;
+    pthread_cond_t condition;
+    unsigned int readyWorkers;
+    unsigned int pathMask;
+    int didStart;
+    int shouldRun;
+} FLLogCTestStressContext;
+
+typedef struct {
+    FLLogCTestStressContext *context;
+    unsigned int index;
+} FLLogCTestStressWorker;
+
+static unsigned int FLLogCTestExercisePath(
+    FLLogCHandle handle,
+    unsigned int path
+) {
+    switch (path) {
+        case 0:
+            FLLogCInfoH(handle, "concurrent literal");
+            FLLogCLogH(
+                handle,
+                FL_LOG_LEVEL_ERROR,
+                FL_LOG_PRIVACY_PRIVATE,
+                "concurrent explicit"
+            );
+            return FLLogCTestLiteralPath;
+        case 1:
+            (void)FLLogCIsEnabledH(handle, FL_LOG_LEVEL_DEBUG);
+            return FLLogCTestEnabledPath;
+        case 2: {
+            FLLogCFields fields = {
+                .component = "lifecycle",
+                .phase = "stress",
+                .errorCode = 0,
+                .correlationID = "worker-1",
+            };
+            FLLogCLogStructuredH(
+                handle,
+                FL_LOG_LEVEL_WARN,
+                FL_LOG_PRIVACY_PRIVATE,
+                &fields,
+                "concurrent structured"
+            );
+            return FLLogCTestStructuredPath;
+        }
+        default:
+            FLLogCLogfPrivacyH(
+                handle,
+                FL_LOG_LEVEL_INFO,
+                FL_LOG_PRIVACY_PUBLIC,
+                "concurrent printf %u",
+                path
+            );
+            return FLLogCTestPrintfPath;
+    }
+}
+
+static void *FLLogCTestStressThread(void *rawWorker) {
+    FLLogCTestStressWorker *worker = rawWorker;
+    FLLogCTestStressContext *context = worker->context;
+
+    FLLogCTestLock(&context->lock);
+    context->readyWorkers += 1;
+    FLLogCTestBroadcast(&context->condition);
+    while (!context->didStart) {
+        FLLogCTestWait(&context->condition, &context->lock);
+    }
+    FLLogCTestUnlock(&context->lock);
+
+    unsigned int path = worker->index % 4;
+    while (1) {
+        FLLogCTestLock(&context->lock);
+        int shouldRun = context->shouldRun;
+        FLLogCTestUnlock(&context->lock);
+        if (!shouldRun) break;
+
+        unsigned int completedPath = FLLogCTestExercisePath(
+            context->handle,
+            path
+        );
+        path = (path + 1) % 4;
+
+        FLLogCTestLock(&context->lock);
+        context->pathMask |= completedPath;
+        FLLogCTestBroadcast(&context->condition);
+        FLLogCTestUnlock(&context->lock);
+    }
+    return 0;
+}
+
+static int FLLogCTestRunTeardownStressIteration(unsigned int workerCount) {
+    FLLogCTestStressContext context = {0};
+    context.shouldRun = 1;
+    context.handle = FLLogCCreate(
+        "com.forgelogkit.tests",
+        "ConcurrentTeardown"
+    );
+    if (!context.handle) return 0;
+    if (pthread_mutex_init(&context.lock, 0) != 0) {
+        FLLogCDestroy(context.handle);
+        return 0;
+    }
+    if (pthread_cond_init(&context.condition, 0) != 0) {
+        pthread_mutex_destroy(&context.lock);
+        FLLogCDestroy(context.handle);
+        return 0;
+    }
+
+    pthread_t *threads = calloc(workerCount, sizeof(*threads));
+    FLLogCTestStressWorker *workers = calloc(workerCount, sizeof(*workers));
+    if (!threads || !workers) {
+        free(threads);
+        free(workers);
+        pthread_cond_destroy(&context.condition);
+        pthread_mutex_destroy(&context.lock);
+        FLLogCDestroy(context.handle);
+        return 0;
+    }
+
+    unsigned int createdWorkers = 0;
+    for (; createdWorkers < workerCount; createdWorkers++) {
+        workers[createdWorkers].context = &context;
+        workers[createdWorkers].index = createdWorkers;
+        if (pthread_create(
+            &threads[createdWorkers],
+            0,
+            FLLogCTestStressThread,
+            &workers[createdWorkers]
+        ) != 0) break;
+    }
+
+    FLLogCTestLock(&context.lock);
+    if (createdWorkers == workerCount) {
+        while (context.readyWorkers < workerCount) {
+            FLLogCTestWait(&context.condition, &context.lock);
+        }
+        context.didStart = 1;
+        FLLogCTestBroadcast(&context.condition);
+        while (context.pathMask != FLLogCTestAllPaths) {
+            FLLogCTestWait(&context.condition, &context.lock);
+        }
+    }
+    context.shouldRun = 0;
+    context.didStart = 1;
+    FLLogCTestBroadcast(&context.condition);
+    FLLogCTestUnlock(&context.lock);
+
+    FLLogCDestroy(context.handle);
+    for (unsigned int index = 0; index < createdWorkers; index++) {
+        pthread_join(threads[index], 0);
+    }
+
+    int result =
+        createdWorkers == workerCount &&
+        context.pathMask == FLLogCTestAllPaths;
+    free(threads);
+    free(workers);
+    pthread_cond_destroy(&context.condition);
+    pthread_mutex_destroy(&context.lock);
+    return result;
+}
+
+int FLLogCTestConcurrentHandleTeardown(
+    unsigned int iterations,
+    unsigned int workerCount
+) {
+    if (iterations == 0 || workerCount == 0 || workerCount > 16) return 0;
+
+    for (unsigned int iteration = 0; iteration < iterations; iteration++) {
+        if (!FLLogCTestRunTeardownStressIteration(workerCount)) return 0;
+    }
+    return 1;
+}
+
+int FLLogCTestDefensivelyRejectsImmediateStaleHandle(void) {
+    FLLogCHandle handle = FLLogCCreate(
+        "com.forgelogkit.tests",
+        "ImmediateStaleHandle"
+    );
+    if (!handle) return 0;
+
+    FLLogCDestroy(handle);
+    FLLogCTestExerciseAllHandlePaths(handle);
+    int isEnabled = FLLogCIsEnabledH(handle, FL_LOG_LEVEL_INFO);
+    FLLogCDestroy(handle);
+    return isEnabled == 0;
 }
 
 const char *FLLogCTestEventMessage(const FLLogCTestEvent *event) {

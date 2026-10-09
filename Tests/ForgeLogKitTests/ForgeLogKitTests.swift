@@ -416,6 +416,69 @@ struct FLLogTests {
         #expect(recorder.events.isEmpty)
     }
 
+    @Test("Disabled structured logging evaluates neither dynamic fields nor message")
+    func testDisabledDynamicFieldsAreLazy() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "LazyFields", backend: recorder.backend(isEnabled: false))
+        let message = MessageProbe()
+        var fieldCalls = 0
+        for level: ForgeLogKit.FLLogLevel in [.debug, .info, .warning, .error, .fault] {
+            logger.log(level, message.evaluate(), lazyFields: {
+                fieldCalls += 1
+                return FLLogFields(component: "runtime")
+            })
+        }
+        #expect(fieldCalls == 0)
+        #expect(message.evaluationCount == 0)
+        #expect(recorder.events.isEmpty)
+    }
+
+    @Test("Dynamic fields precede the message exactly once and preserve the eager contract")
+    func testDynamicFieldsEvaluationAndPrivacy() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "LazyFields", backend: recorder.backend())
+        var order: [String] = []
+        func message() -> String {
+            order.append("message")
+            return "token=synthetic-canary ready"
+        }
+        let fields = FLLogFields(component: "runtime", phase: "start")!
+        for level: ForgeLogKit.FLLogLevel in [.debug, .info, .warning, .error, .fault] {
+            logger.log(level, message(), lazyFields: {
+                order.append("fields")
+                return fields
+            })
+            logger.log(level, "token=synthetic-canary ready", fields: fields)
+        }
+        #expect(order == Array(repeating: ["fields", "message"], count: 5).flatMap { $0 })
+        let events = recorder.events
+        #expect(events.count == 10)
+        for index in stride(from: 0, to: events.count, by: 2) {
+            #expect(events[index].message == events[index + 1].message)
+            #expect(events[index].type == events[index + 1].type)
+            #expect(events[index].privacy == "private")
+            #expect(!events[index].message.contains("synthetic-canary"))
+            #expect(events[index].message.contains("<redacted>"))
+        }
+        logger.log(.info, "public status", lazyFields: { fields }, privacy: .public)
+        #expect(recorder.events.last?.privacy == "public")
+    }
+
+    @Test("Invalid dynamic fields drop the event without evaluating its message")
+    func testInvalidDynamicFieldsSkipMessage() {
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "LazyFields", backend: recorder.backend())
+        let message = MessageProbe()
+        var fieldCalls = 0
+        logger.log(.error, message.evaluate(), lazyFields: {
+            fieldCalls += 1
+            return FLLogFields(component: "invalid value")
+        })
+        #expect(fieldCalls == 1)
+        #expect(message.evaluationCount == 0)
+        #expect(recorder.events.isEmpty)
+    }
+
     @Test("Every Swift entry point redacts secret-bearing content before routing")
     func testSwiftEntryPointRedaction() {
         let canaries = [
@@ -491,6 +554,57 @@ struct FLLogTests {
         #expect(result.requiredCapacity == result.output.utf8.count + 1)
         #expect(leakDetected == false)
         #expect(markerCount == canaries.count)
+    }
+
+    @Test("Key aliases share exact C and lazy Swift output, including truncated buffers")
+    func testKeyAliasRedaction() {
+        let aliases = [
+            "PrivateKey", "private_key", "private-key",
+            "PresharedKey", "preshared_key", "preshared-key",
+            "HeaderProtectionKey", "header_protection_key", "header-protection-key",
+        ]
+        let fields = FLLogFields(component: "runtime")!
+        for alias in aliases {
+            for name in [alias, alias.uppercased(), alias.lowercased()] {
+                let canary = "synthetic-key-canary+/=="
+                let cases = [
+                    ("\(name) = \(canary)\r\nready=true", "\(name) = <redacted>\r\nready=true"),
+                    ("{\"\(name)\":\"\(canary)\",\"ready\":true}", "{\"\(name)\":\"<redacted>\",\"ready\":true}"),
+                    ("{\"\(name)\":\n\"\(canary)\"}", "{\"\(name)\":\n\"<redacted>\"}"),
+                    ("{\"\(name)\"\n:\"\(canary)\"}", "{\"\(name)\"\n:\"<redacted>\"}"),
+                    ("{\"\(name)\":\r\n\"\(canary)\"}", "{\"\(name)\":\r\n\"<redacted>\"}"),
+                    ("{\"\(name)\"\r\n:\"\(canary)\"}", "{\"\(name)\"\r\n:\"<redacted>\"}"),
+                    ("\(name)='\(canary) escaped\\' tail'", "\(name)='<redacted>'"),
+                    ("\(name)=\"\(canary) unterminated\nrest", "\(name)=\"<redacted>"),
+                    ("\(name)=\(canary)&ready=true", "\(name)=<redacted>&ready=true"),
+                    ("\(name):\nready=true", "\(name):<redacted>\nready=true"),
+                    ("\(name)\n:ready=true", "\(name)\n:ready=true"),
+                    ("\"\(name)\"=\nready=true", "\"\(name)\"=<redacted>\nready=true"),
+                ]
+                for (input, expected) in cases {
+                    #expect(redactWithC(input).output == expected)
+                    for capacity in 0 ... expected.utf8.count + 2 {
+                        let result = redactWithC(input, capacity: capacity)
+                        #expect(Array(result.output.utf8) == Array(expected.utf8.prefix(max(0, capacity - 1))))
+                        #expect(result.requiredCapacity == expected.utf8.count + 1)
+                    }
+                    let recorder = LogRecorder()
+                    let logger = FLLog(category: "Aliases", backend: recorder.backend())
+                    logger.log(.error, input, lazyFields: { fields })
+                    let formatted = formatStructuredWithC(
+                        category: "Aliases", level: FL_LOG_LEVEL_ERROR,
+                        fields: fields, message: input
+                    ).output
+                    #expect(recorder.events.count == 1)
+                    #expect(recorder.events.first?.message == formatted)
+                    #expect(formatted.hasSuffix(expected))
+                    #expect(!formatted.contains(canary))
+                }
+                for benign in ["\(name)Count=7", "prefix\(name)=ok", "\(name)_count=7", "\(name)-count=7"] {
+                    #expect(redactWithC(benign).output == benign)
+                }
+            }
+        }
     }
 
     @Test("Redactor preserves benign lookalikes and public URLs")
@@ -627,6 +741,21 @@ struct FLLogCTests {
         
         FLLogCDestroy(handle)
         // Successfully destroyed, no crash
+    }
+
+    @Test("Destroy waits for borrowed calls and rejects closing entry points")
+    func testDestroyWaitsForBorrowedCalls() {
+        #expect(FLLogCTestDestroyWaitsForBorrowedCalls() == 1)
+    }
+
+    @Test("All C entry points survive repeated concurrent teardown")
+    func testConcurrentHandleTeardownStress() {
+        #expect(FLLogCTestConcurrentHandleTeardown(128, 4) == 1)
+    }
+
+    @Test("Immediate stale calls and repeated destroy fail closed defensively")
+    func testImmediateStaleHandleRejection() {
+        #expect(FLLogCTestDefensivelyRejectsImmediateStaleHandle() == 1)
     }
     
     @Test("Create handle with null subsystem uses default")
