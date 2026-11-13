@@ -153,7 +153,8 @@ Values become `<redacted>` and private-key blocks become
 `<redacted-private-key>`. The C redactor always NUL-terminates a supplied
 non-empty buffer and computes truncation from already-redacted output, so a
 short buffer cannot expose a partial matched value. Inputs that reach the 64
-KiB scan bound fail closed without emission. Privacy routing remains a separate
+KiB scan bound fail closed: C/ObjC and Swift structured paths emit nothing;
+Swift basic paths emit `<redacted-invalid-message>`. Privacy routing remains a separate
 defense: callers should still avoid logging unlabeled raw secrets and should
 use `.private` unless a message is intentionally public.
 This is label-based defense in depth, not a configuration parser or a guarantee
