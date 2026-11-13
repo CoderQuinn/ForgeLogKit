@@ -39,5 +39,9 @@ swift test \
     -Xswiftc -warnings-as-errors
 
 echo
+echo "== Actual Objective-C adapter capture harness =="
+bash "${script_directory}/test-objc-redaction.sh"
+
+echo
 echo "== Production coverage gate =="
-"${script_directory}/coverage.sh"
+"${script_directory}/coverage.sh" "${COVERAGE_BASE:-}"

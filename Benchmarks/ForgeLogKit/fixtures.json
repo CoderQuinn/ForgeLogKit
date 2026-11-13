@@ -1,0 +1,12 @@
+{
+  "canaries": [
+    {"input":"safe=🙂 token=\"BENCH-UNICODE-SECRET🔒\"; done=ok", "expected":"safe=🙂 token=\"<redacted>\"; done=ok", "forbidden":"BENCH-UNICODE-SECRET"},
+    {"input":"ready=true\n-----BEGIN PRIVATE KEY-----\nBENCH-PEM-SECRET\n-----END PRIVATE KEY-----\nend=ok", "expected":"ready=true\n<redacted-private-key>\nend=ok", "forbidden":"BENCH-PEM-SECRET"},
+    {"input":"{\"private_key\" = \"BENCH-EQUALS-SECRET\"; ready=true}", "expected":"{\"private_key\" = \"<redacted>\"; ready=true}", "forbidden":"BENCH-EQUALS-SECRET"}
+  ],
+  "sizes": [64, 1024, 16384, 65535],
+  "sizeTail": " token=BENCH-SIZE-SECRET; end=ok",
+  "sizeExpectedTail": " token=<redacted>; end=ok",
+  "producerInput": "ready=true token=BENCH-PRODUCER-SECRET; state=ok",
+  "producerExpected": "[Bench] [ERROR] ready=true token=<redacted>; state=ok"
+}
