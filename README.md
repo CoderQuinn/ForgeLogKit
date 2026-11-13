@@ -291,6 +291,31 @@ instead of a cross-platform matrix.
 
 ---
 
+## Native diagnostic benchmark
+
+The additive [standalone harness](Benchmarks/ForgeLogKit/README.md) checks
+unevaluated disabled Swift builders, independent redaction byte oracles at
+64/1024/16384/65535 bytes, and 1/2/4/8 producers sharing one owned C handle.
+Every worker joins before the owner destroys that handle once.
+
+```sh
+bash Scripts/benchmark-logkit.sh check --output .build/logkit-check
+# Coordinate an exclusive timing slot before running measurements:
+bash Scripts/benchmark-logkit.sh run --output .build/logkit-run \
+  --candidate "$(git rev-parse HEAD)" --timing-slot CONTROLLER_SLOT
+bash Scripts/benchmark-logkit.sh validate .build/logkit-run/result.json
+```
+
+Release results retain exact Git/dirty/toolchain/OS provenance, source,
+fixture and executable SHA-256 digests, correctness counters and every raw
+batch sample. Qualification requires a clean exact revision; explicit
+`--diagnostic` permits dirty input while retaining the diagnostic label.
+The controlled capture seam does byte comparisons instead of OS submission;
+measurements are batch averages including documented harness overhead.
+The schema and measurement boundaries are frozen in the harness README.
+
+---
+
 ## License
 
 [Apache License 2.0](LICENSE)

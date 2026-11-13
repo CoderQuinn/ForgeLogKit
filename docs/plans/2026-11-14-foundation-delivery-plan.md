@@ -29,11 +29,11 @@
 **Files:** `Tests/ForgeLogKitTests/`, `Tests/ObjCRedactionHarness/`, `Scripts/ci.sh`, `Scripts/test-objc-redaction.sh`, `Scripts/coverage.sh` as needed, README. Production redaction only for reproduced failures.
 **Interfaces:** existing Swift lazy logging, C redaction/handle and ObjC adapter; additive tests and consumer proof. Benchmark scope belongs to Task 2.
 
-- [ ] Freeze canary/API boundary table in spec; inspect current tests to avoid duplicating #14.
-- [ ] RED: missing actual ObjC CI invocation and any newly uncovered canary boundary. Preserve failing reproduction before minimal fix.
-- [ ] Add deterministic canaries across actual adapters and wire harness to CI; extend coverage accounting to authored languages where missing.
-- [ ] GREEN: Debug/Release, strict concurrency, coverage, actual ObjC harness, clean Git consumer exact revision, changed-line audit. Record both production numerator/denominator and gaps.
-- [ ] Commit and report base..head/evidence/rollback for independent review before Task 2.
+- [x] Freeze canary/API boundary table in spec; inspect current tests to avoid duplicating #14.
+- [x] RED: missing actual ObjC CI invocation and any newly uncovered canary boundary. Preserve failing reproduction before minimal fix.
+- [x] Add deterministic canaries across actual adapters and wire harness to CI; extend coverage accounting to authored languages where missing.
+- [x] GREEN: Debug/Release, strict concurrency, coverage, actual ObjC harness, clean Git consumer exact revision, changed-line audit. Record both production numerator/denominator and gaps.
+- [x] Commit and report base..head/evidence/rollback for independent review before Task 2.
 
 ### Task 2: Native diagnostic benchmark with bounded lifetime
 
@@ -44,4 +44,3 @@
 - [ ] Add native Release measurements with candidate SHA/dirty/toolchain/OS/executable/fixture digests and raw samples. Use a controlled nonpersistent capture seam; describe its measurement boundary accurately.
 - [ ] RED→GREEN for invalid/missing provenance, oracle failure and lifetime synchronization. Dirty runs are diagnostic, never qualification. No invented allocation/zero-copy/p99 claims.
 - [ ] Run harness correctness checks, relevant existing regression gates and clean consumer compatibility as needed by the diff. Request exclusive timing slot; commit and report for independent review.
-

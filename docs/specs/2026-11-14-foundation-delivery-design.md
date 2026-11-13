@@ -49,3 +49,32 @@ and rejects missing coverage files. Shell orchestration and JSON/docs are
 outside LLVM's language scope and have separate execution evidence. A zero
 production-change denominator means no production executable lines changed;
 it is not presented as a measured percentage.
+
+## Task 2 frozen diagnostic interface
+
+The exact CLI, schema 1 fields, independent fixture sizes and timing boundaries
+are frozen in [the harness contract](../../Benchmarks/ForgeLogKit/README.md).
+The standalone Release executable compiles unchanged production Swift/C
+sources. Disabled Swift logging uses its existing internal backend seam;
+shared-handle producers replace only C `os_log_with_type` with a thread-local
+byte oracle. One owned handle exists per producer batch. Ready workers start
+through a condition-variable gate; all workers complete and join before the
+owner's single destroy call. The native guard rejects incomplete joins,
+active borrowers and repeated destruction without executing an unsafe lifetime.
+
+Run output records candidate/current SHA, dirty entries, toolchain and OS,
+source manifest and executable/fixture hashes, raw batch nanoseconds and all
+correctness/lifetime counters. Invalid provenance, oracle or lifetime evidence
+produces no new result. Dirty runs are diagnostic only. `validate` requires
+the recorded exact Git state and files, so inspect a historical result from
+its recorded checkout. No production API, background work or persistent sink
+is added. The controlled measurement includes capture comparisons/counting,
+and producer scheduling/joins; it establishes neither OS persistence nor
+allocator, tail-latency or application-workload performance.
+
+Task 2 coverage accounts for every new Swift/C/Python/Bash executable file
+with explicit whole-file and added-line counts, including test tooling.
+Native LLVM summary lines and unique physical LCOV lines are distinguished;
+Python and Bash require their own coverage records rather than an LLVM-only
+claim. Task 1 production evidence remains separately frozen at its tested
+revision; final combined-PR tooling coverage is an additional audit.

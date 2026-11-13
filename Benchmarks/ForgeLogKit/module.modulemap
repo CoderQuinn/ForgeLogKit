@@ -1,0 +1,4 @@
+module ForgeBenchC {
+    header "Native.h"
+    export *
+}
