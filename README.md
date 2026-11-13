@@ -271,4 +271,7 @@ instead of a cross-platform matrix.
 
 ## License
 
-[Apache License 2.0](LICENSE)
+First-party material is licensed under **Apache-2.0**; see [LICENSE](LICENSE).
+See [COPYRIGHT.md](COPYRIGHT.md) for the exact scope, third-party exclusions,
+retained historical grants and copyright notices. No commercial-license or
+store-distribution exception is granted here.
