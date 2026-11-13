@@ -9,7 +9,7 @@ import os
 import pathlib
 import platform
 import re
-import subprocess
+import subprocess  # nosec B404 # Audited list argv below always disables the shell.
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
@@ -21,9 +21,9 @@ def require(condition, message):
     if not condition:
         raise ValueError(message)
 
-
-def command(args, **kwargs):
-    return subprocess.run(args, cwd=ROOT, check=True, text=True, capture_output=True, **kwargs).stdout.rstrip("\n")
+# Call sites fix trusted developer tools or the locally built binary; CLI paths/counts/SHA remain separate argv operands.
+def command(args, *, env=None):
+    return subprocess.run(args, cwd=ROOT, shell=False, check=True, text=True, capture_output=True, env=env).stdout.rstrip("\n")  # nosec B603 # Fixed tool/built-binary argv; values remain operands. # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-audit.dangerous-subprocess-use-audit
 
 
 def digest(path):

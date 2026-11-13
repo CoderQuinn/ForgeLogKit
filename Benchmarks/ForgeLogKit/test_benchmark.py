@@ -6,7 +6,7 @@ import io
 import json
 import os
 import pathlib
-import subprocess
+import subprocess  # nosec B404 # Literal Bash fixture below runs without a shell.
 import tempfile
 import unittest
 from unittest import mock
@@ -32,9 +32,9 @@ class NativeContract(unittest.TestCase):
         return out.getvalue(), error.getvalue()
 
     def test_correctness_command_checks_disabled_oracle_and_joined_lifetime(self):
-        result = subprocess.run(
+        result = subprocess.run(  # nosec B603 # Fully literal local Bash/check argv below; shell=False.
             ["bash", "Scripts/benchmark-logkit.sh", "check", "--output", ".build/benchmark-test"],
-            cwd=ROOT, text=True, capture_output=True,
+            cwd=ROOT, shell=False, text=True, capture_output=True,
         )
         self.assertEqual(result.returncode, 0, "native check command required: " + result.stderr)
         self.assertIn("correctness checks passed", result.stdout)
@@ -212,6 +212,17 @@ class NativeContract(unittest.TestCase):
                 _, error = self.cli(*arguments, expected=1)
             self.assertIn("source/toolchain changed during run", error)
             self.assertFalse(path.exists())
+
+
+class CommandTrust(unittest.TestCase):
+    def test_shell_metacharacters_stay_literal_and_candidate_cannot_execute(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            marker = pathlib.Path(temporary) / "unexpected-command"
+            operand = "$(touch " + str(marker) + "); `touch " + str(marker) + "`"
+            self.assertEqual(driver.command(["/usr/bin/printf", "%s", operand]), operand)
+            with self.assertRaisesRegex(ValueError, "full candidate"):
+                driver.git_state(operand, True)
+            self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":
