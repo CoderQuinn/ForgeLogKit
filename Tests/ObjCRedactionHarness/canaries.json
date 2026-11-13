@@ -1,0 +1,74 @@
+[
+  {
+    "id": "multiline-json-pem",
+    "input": "前文 {\"private_key\"\r\n:\n\"-----BEGIN PRIVATE KEY-----\nCANARY-JSON-KEY\n-----END PRIVATE KEY-----\",\"ready\":true} 後文",
+    "expected": "前文 {\"private_key\"\r\n:\n\"<redacted>\",\"ready\":true} 後文",
+    "canaries": [
+      "CANARY-JSON-KEY"
+    ]
+  },
+  {
+    "id": "standalone-pem",
+    "input": "ready=true\n-----BEGIN PRIVATE KEY-----\nCANARY-PEM-KEY\n-----END PRIVATE KEY-----\n状態=ok",
+    "expected": "ready=true\n<redacted-private-key>\n状態=ok",
+    "canaries": [
+      "CANARY-PEM-KEY"
+    ]
+  },
+  {
+    "id": "quoted-equals",
+    "input": "\"private_key\" = \"CANARY-EQUALS\"; ready=true",
+    "expected": "\"private_key\" = \"<redacted>\"; ready=true",
+    "canaries": [
+      "CANARY-EQUALS"
+    ]
+  },
+  {
+    "id": "quoted-equals-empty",
+    "input": "\"private_key\" = \"\"; ready=true",
+    "expected": "\"private_key\" = \"<redacted>\"; ready=true",
+    "canaries": []
+  },
+  {
+    "id": "quoted-equals-escape",
+    "input": "\"private_key\" = \"CANARY-ESCAPE\\\" tail\"; ready=true",
+    "expected": "\"private_key\" = \"<redacted>\"; ready=true",
+    "canaries": [
+      "CANARY-ESCAPE"
+    ]
+  },
+  {
+    "id": "quoted-equals-unclosed",
+    "input": "ready=true; \"private_key\" = \"CANARY-UNCLOSED\nremaining",
+    "expected": "ready=true; \"private_key\" = \"<redacted>",
+    "canaries": [
+      "CANARY-UNCLOSED"
+    ]
+  },
+  {
+    "id": "unicode",
+    "input": "安全🙂 token=\"秘密-CANARY-UNICODE🔒\"; 状態=準備完了 café",
+    "expected": "安全🙂 token=\"<redacted>\"; 状態=準備完了 café",
+    "canaries": [
+      "秘密-CANARY-UNICODE🔒"
+    ]
+  },
+  {
+    "id": "nul-after-secret",
+    "input": "ready=true token=CANARY-BEFORE-NUL\u0000 token=CANARY-AFTER-NUL 状態=ok",
+    "expected": "ready=true token=<redacted>",
+    "canaries": [
+      "CANARY-BEFORE-NUL",
+      "CANARY-AFTER-NUL"
+    ]
+  },
+  {
+    "id": "nul-inside-secret",
+    "input": "状態=ok token=CANARY-NUL-PREFIX\u0000CANARY-NUL-TAIL ready=true",
+    "expected": "状態=ok token=<redacted>",
+    "canaries": [
+      "CANARY-NUL-PREFIX",
+      "CANARY-NUL-TAIL"
+    ]
+  }
+]

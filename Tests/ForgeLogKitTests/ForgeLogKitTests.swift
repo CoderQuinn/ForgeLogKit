@@ -163,6 +163,13 @@ private func containsCanary(_ text: String, canaries: [String]) -> Bool {
     canaries.contains { text.contains($0) }
 }
 
+private struct SharedCanary: Decodable {
+    let id: String
+    let input: String
+    let expected: String
+    let canaries: [String]
+}
+
 /// Tests for FLLog Swift API to verify category and level prefixes
 @Suite("FLLog Swift API Tests")
 struct FLLogTests {
@@ -665,6 +672,84 @@ struct FLLogTests {
         #expect(nullBuffer[0] == 0)
     }
     
+    @Test("Shared canaries preserve exact UTF-8 bytes across Swift and C boundaries")
+    func testSharedByteCanaries() throws {
+        let fixtureURL = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("ObjCRedactionHarness/canaries.json")
+        let fixtures = try JSONDecoder().decode(
+            [SharedCanary].self, from: Data(contentsOf: fixtureURL)
+        )
+        #expect(!fixtures.isEmpty)
+        let fields = FLLogFields(component: "runtime")!
+        for fixture in fixtures {
+            let expectedBytes = Array(fixture.expected.utf8)
+            let redacted = redactWithC(fixture.input)
+            #expect(Array(redacted.output.utf8) == expectedBytes, "\(fixture.id)")
+            #expect(redacted.requiredCapacity == expectedBytes.count + 1)
+            let structured = "[Canaries] [ERROR] [component=runtime] " + fixture.expected
+            #expect(Array(formatStructuredWithC(
+                category: "Canaries", level: FL_LOG_LEVEL_ERROR,
+                fields: fields, message: fixture.input
+            ).output.utf8) == Array(structured.utf8))
+
+            let recorder = LogRecorder()
+            let logger = FLLog(category: "Canaries", backend: recorder.backend())
+            logger.error(fixture.input as String)
+            logger.log(.error, fixture.input)
+            logger.log(.error, fixture.input, fields: fields, privacy: .public)
+            logger.log(.error, fixture.input, lazyFields: { fields })
+            #expect(recorder.events.map(\.privacy) == ["public", "private", "public", "private"])
+            let basic = "[Canaries][ERROR] " + fixture.expected
+            #expect(recorder.events.map { Array($0.message.utf8) } ==
+                [basic, basic, structured, structured].map { Array($0.utf8) })
+            #expect(recorder.events.allSatisfy {
+                !containsCanary($0.message, canaries: fixture.canaries)
+            })
+        }
+    }
+
+    @Test("The last accepted UTF-8 input byte and the first rejected byte fail closed")
+    func testExactInputByteBoundary() {
+        let lead = "安全🙂 ready="
+        let tail = " token=CANARY-MAXIMUM"
+        let padding = String(repeating: "x", count: 65_535 - lead.utf8.count - tail.utf8.count)
+        let accepted = lead + padding + tail
+        let expected = lead + padding + " token=<redacted>"
+        #expect(accepted.utf8.count == 65_535)
+        #expect(Array(redactWithC(accepted).output.utf8) == Array(expected.utf8))
+        let fields = FLLogFields(component: "runtime")!
+        let structuredPrefix = "[Canaries] [ERROR] [component=runtime] "
+        let formatted = formatStructuredWithC(
+            category: "Canaries", level: FL_LOG_LEVEL_ERROR,
+            fields: fields, message: accepted
+        )
+        #expect(formatted.requiredCapacity == (structuredPrefix + expected).utf8.count + 1)
+        #expect(Array(formatted.output.utf8) == Array((structuredPrefix + expected).utf8))
+        let recorder = LogRecorder()
+        let logger = FLLog(category: "Canaries", backend: recorder.backend())
+        logger.log(.error, accepted)
+        logger.log(.error, accepted, lazyFields: { fields })
+        let rejected = accepted + "x"
+        #expect(rejected.utf8.count == 65_536)
+        let redacted = redactWithC(rejected, capacity: 1)
+        #expect(redacted.requiredCapacity == 0)
+        #expect(redacted.output.isEmpty)
+        #expect(formatStructuredWithC(
+            category: "Canaries", level: FL_LOG_LEVEL_ERROR,
+            fields: fields, message: rejected, capacity: 1
+        ).requiredCapacity == 0)
+        logger.error(rejected as String)
+        logger.log(.error, rejected)
+        logger.log(.error, rejected, lazyFields: { fields })
+        #expect(recorder.events.map(\.message) == [
+            "[Canaries][ERROR] " + expected, structuredPrefix + expected,
+            "[Canaries][ERROR] <redacted-invalid-message>",
+            "[Canaries][ERROR] <redacted-invalid-message>",
+        ])
+        #expect(recorder.events.allSatisfy { !$0.message.contains("CANARY-MAXIMUM") })
+    }
+
     // MARK: - Initialization Tests
     
     @Test("Logger initialization with subsystem and category")
