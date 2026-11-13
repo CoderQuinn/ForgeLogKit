@@ -216,4 +216,6 @@ Objective-C 适配器和 Apple Unified Logging API 依赖 macOS/Xcode，因此�
 
 ## 许可证
 
-[Apache License 2.0](LICENSE)
+自有材料采用 **Apache-2.0**，完整条款见 [LICENSE](LICENSE)。
+适用范围、第三方例外、历史授权及版权声明见 [COPYRIGHT.md](COPYRIGHT.md)。
+本次变更不授予额外商业许可或商店分发例外。
